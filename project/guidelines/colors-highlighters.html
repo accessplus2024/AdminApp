@@ -1,0 +1,36 @@
+<!-- @dsCard group="Colors" viewport="700x180" name="Highlighters & paper" subtitle="grifa texto / grifa tópicos / citações + corretivo paper" -->
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<link rel="stylesheet" href="../styles.css" />
+<style>
+  body { margin: 0; padding: 20px; background: var(--neutral-0); }
+  .row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+  .sw { border-radius: var(--radius-lg); padding: 14px; height: 116px; display: flex; flex-direction: column; justify-content: space-between; border: 1px solid var(--border); color: var(--ink); }
+  .name { font-family: var(--font-body); font-weight: 600; font-size: 13px; }
+  .meta { font-family: var(--font-mono); font-size: 11px; opacity: .75; }
+  .pt { font-family: var(--font-body); font-size: 11px; opacity: .65; }
+</style>
+</head>
+<body>
+  <div class="row">
+    <div class="sw" style="background: var(--grifa-texto);">
+      <div class="name">grifa texto</div>
+      <div><div class="pt">lime highlight</div><div class="meta">#CFF665</div></div>
+    </div>
+    <div class="sw" style="background: var(--grifa-topicos); color:#fff;">
+      <div class="name">grifa tópicos</div>
+      <div><div class="pt">pink highlight</div><div class="meta">#F239A7</div></div>
+    </div>
+    <div class="sw" style="background: var(--citacoes);">
+      <div class="name">citações</div>
+      <div><div class="pt">mint</div><div class="meta">#9CF0E3</div></div>
+    </div>
+    <div class="sw" style="background: var(--corretivo);">
+      <div class="name">corretivo</div>
+      <div><div class="pt">paper / bg</div><div class="meta">#F9F9F9</div></div>
+    </div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,30 @@
+<!-- @dsCard group="Colors" viewport="700x150" name="Neutral scale" subtitle="Cool, indigo-tinted greys — 0 → 950" -->
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<link rel="stylesheet" href="../styles.css" />
+<style>
+  body { margin: 0; padding: 20px; background: var(--neutral-0); }
+  .scale { display: flex; gap: 0; border-radius: var(--radius-md); overflow: hidden; border: 1px solid var(--border); }
+  .cell { flex: 1; height: 84px; display: flex; align-items: flex-end; justify-content: center; padding-bottom: 8px; }
+  .lbl { font-family: var(--font-mono); font-size: 10px; }
+</style>
+</head>
+<body>
+  <div class="scale">
+    <div class="cell" style="background:var(--neutral-0);"><span class="lbl" style="color:var(--neutral-600)">0</span></div>
+    <div class="cell" style="background:var(--neutral-50);"><span class="lbl" style="color:var(--neutral-600)">50</span></div>
+    <div class="cell" style="background:var(--neutral-100);"><span class="lbl" style="color:var(--neutral-600)">100</span></div>
+    <div class="cell" style="background:var(--neutral-200);"><span class="lbl" style="color:var(--neutral-700)">200</span></div>
+    <div class="cell" style="background:var(--neutral-300);"><span class="lbl" style="color:var(--neutral-700)">300</span></div>
+    <div class="cell" style="background:var(--neutral-400);"><span class="lbl" style="color:var(--neutral-900)">400</span></div>
+    <div class="cell" style="background:var(--neutral-500);"><span class="lbl" style="color:#fff">500</span></div>
+    <div class="cell" style="background:var(--neutral-600);"><span class="lbl" style="color:#fff">600</span></div>
+    <div class="cell" style="background:var(--neutral-700);"><span class="lbl" style="color:#fff">700</span></div>
+    <div class="cell" style="background:var(--neutral-800);"><span class="lbl" style="color:#fff">800</span></div>
+    <div class="cell" style="background:var(--neutral-900);"><span class="lbl" style="color:#fff">900</span></div>
+    <div class="cell" style="background:var(--neutral-950);"><span class="lbl" style="color:#fff">950</span></div>
+  </div>
+</body>
+</html>

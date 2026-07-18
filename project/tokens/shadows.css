@@ -1,0 +1,19 @@
+/* ============================================================
+   Access+Plus — Elevation / shadow tokens
+   Soft, cool-tinted shadows (toward the indigo ink, never pure black).
+   Admin surfaces stay flat-ish; elevation reserved for overlays.
+   ============================================================ */
+
+:root {
+  --shadow-xs: 0 1px 2px rgba(14, 0, 51, 0.06);
+  --shadow-sm: 0 1px 2px rgba(14, 0, 51, 0.06), 0 1px 3px rgba(14, 0, 51, 0.08);
+  --shadow-md: 0 2px 4px rgba(14, 0, 51, 0.06), 0 4px 12px rgba(14, 0, 51, 0.08);
+  --shadow-lg: 0 8px 16px rgba(14, 0, 51, 0.08), 0 12px 32px rgba(14, 0, 51, 0.12);
+  --shadow-xl: 0 16px 32px rgba(14, 0, 51, 0.12), 0 24px 64px rgba(14, 0, 51, 0.16);
+
+  /* Focus ring (brand blue, offset look) */
+  --ring-shadow: 0 0 0 3px rgba(65, 1, 246, 0.35);
+
+  /* Inset / pressed */
+  --shadow-inset: inset 0 1px 2px rgba(14, 0, 51, 0.10);
+}

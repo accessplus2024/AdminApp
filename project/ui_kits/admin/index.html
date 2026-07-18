@@ -1,0 +1,164 @@
+<!-- @dsCard group="Admin App" viewport="1320x880" name="Access+ Admin — full app" subtitle="Login, opportunities + filters, detail, editor, newsletter & team (interactive)" -->
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Access+Plus · Admin</title>
+<link rel="stylesheet" href="../../styles.css" />
+<style>
+  html, body { margin: 0; background: var(--background); }
+  .ico, .ico-sm, .ico-xs, .nav-ico, .nav-ico-sm { flex: none; }
+  .ico-star { color: var(--azul); }
+  .ico-star * { fill: var(--azul); }
+
+  .topbar-icon-btn {
+    position: relative; width: 40px; height: 40px; flex: none;
+    border: 1px solid var(--border); background: var(--card);
+    border-radius: var(--radius-md); color: var(--ink);
+    display: inline-flex; align-items: center; justify-content: center;
+    cursor: pointer; transition: background-color .14s ease;
+  }
+  .topbar-icon-btn:hover { background: var(--accent); }
+  .topbar-dot {
+    position: absolute; top: 8px; right: 9px; width: 7px; height: 7px;
+    border-radius: 50%; background: var(--vermelha); border: 1.5px solid var(--card);
+  }
+  .row-action {
+    width: 32px; height: 32px; border: none; background: transparent;
+    border-radius: var(--radius-sm); color: var(--neutral-500);
+    display: inline-flex; align-items: center; justify-content: center; cursor: pointer;
+    transition: background-color .12s ease, color .12s ease;
+  }
+  .row-action:hover { background: var(--accent); color: var(--ink); }
+  .link-cell { background: none; border: none; padding: 0; margin: 0; text-align: left; cursor: pointer; font: inherit; color: inherit; }
+
+  @media (max-width: 1100px) { .topbar-search { display: none !important; } }
+  @media (max-width: 860px) {
+    .ap-login { grid-template-columns: 1fr !important; }
+    .ap-login-art { display: none !important; }
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+<script src="../../_ds_bundle.js"></script>
+<script src="data.js"></script>
+<script src="icons.js"></script>
+<script type="text/babel" src="Login.jsx"></script>
+<script type="text/babel" src="AppShell.jsx"></script>
+<script type="text/babel" src="Dashboard.jsx"></script>
+<script type="text/babel" src="Opportunities.jsx"></script>
+<script type="text/babel" src="OpportunityDetail.jsx"></script>
+<script type="text/babel" src="OpportunityEditor.jsx"></script>
+<script type="text/babel" src="Newsletter.jsx"></script>
+<script type="text/babel" src="Sentinel.jsx"></script>
+<script type="text/babel" src="Team.jsx"></script>
+
+<script type="text/babel">
+  const NS = window.AccessPlusDesignSystem_ece1f0;
+  const { Button, Card } = NS;
+  const D = window.AP_DATA;
+  const Ic = window.Ic;
+
+  const TITLES = {
+    dashboard: 'Visão geral', oportunidades: 'Oportunidades',
+    newsletter: 'Newsletter', sentinel: 'Sentinel', time: 'Membros do time', config: 'Configurações',
+  };
+  const SUBS = {
+    dashboard: 'Acompanhe e gerencie as oportunidades em um só lugar.',
+    oportunidades: 'Crie, filtre, edite e publique as oportunidades visíveis para os estudantes.',
+    newsletter: 'Monte a edição com as oportunidades do Sentinel e publique na Beehiiv.',
+    sentinel: 'Rode o pipeline que encontra novas oportunidades e acompanhe os resultados.',
+    time: 'Gerencie quem tem acesso ao painel e suas permissões.',
+  };
+
+  function App() {
+    const [auth, setAuth] = React.useState(() => localStorage.getItem('ap_admin_auth') === '1');
+    const [active, setActive] = React.useState(() => {
+      const valid = ['dashboard', 'oportunidades', 'newsletter', 'sentinel', 'time', 'config'];
+      const s = localStorage.getItem('ap_admin_screen');
+      return valid.indexOf(s) !== -1 ? s : 'dashboard';
+    });
+    const [route, setRoute] = React.useState({ mode: 'list', opp: null });
+    const [, setTick] = React.useState(0);
+    const rerender = () => setTick((t) => t + 1);
+    React.useEffect(() => { localStorage.setItem('ap_admin_screen', active); }, [active]);
+
+    const go = (s) => { setActive(s); setRoute({ mode: 'list', opp: null }); };
+    const openOpp = (o) => { setActive('oportunidades'); setRoute({ mode: 'detail', opp: o }); };
+    const editOpp = (o) => { setActive('oportunidades'); setRoute({ mode: 'editor', opp: o }); };
+    const newOpp = () => { setActive('oportunidades'); setRoute({ mode: 'editor', opp: null }); };
+    const backToList = () => setRoute({ mode: 'list', opp: null });
+
+    const togglePublish = (o) => {
+      o.status = o.status === 'Publicada' ? 'Rascunho' : 'Publicada';
+      o.inscricoesAbertas = o.status === 'Publicada';
+      setRoute({ mode: 'detail', opp: o }); rerender();
+    };
+    const deleteOpp = (o) => {
+      const i = D.opportunities.indexOf(o);
+      if (i >= 0) D.opportunities.splice(i, 1);
+      backToList(); rerender();
+    };
+    const saveOpp = (form, status) => {
+      const fields = Object.assign({}, form, {
+        elegibilidade: form.elegibilidade.split('\n').map((s) => s.trim()).filter(Boolean),
+        dicas: form.dicas.split('\n').map((s) => s.trim()).filter(Boolean),
+        tagsRelacionadas: form.tags.split(',').map((s) => s.trim()).filter(Boolean),
+        status,
+      });
+      delete fields.tags;
+      if (route.opp) { Object.assign(route.opp, fields); }
+      else { D.opportunities.unshift(Object.assign({ id: Date.now(), inscritos: 0, recursos: [] }, fields)); }
+      backToList(); rerender();
+    };
+
+    if (!auth) {
+      return <window.Login onLogin={() => { setAuth(true); localStorage.setItem('ap_admin_auth', '1'); }} />;
+    }
+
+    let screen;
+    if (active === 'dashboard') screen = <window.Dashboard onOpen={openOpp} onNew={newOpp} />;
+    else if (active === 'oportunidades') {
+      if (route.mode === 'detail') screen = <window.OpportunityDetail opp={route.opp} onBack={backToList} onEdit={editOpp} onDelete={deleteOpp} onTogglePublish={togglePublish} />;
+      else if (route.mode === 'editor') screen = <window.OpportunityEditor opp={route.opp} onCancel={backToList} onSave={saveOpp} onDelete={deleteOpp} />;
+      else screen = <window.Opportunities onOpen={openOpp} onEdit={editOpp} onNew={newOpp} />;
+    }
+    else if (active === 'newsletter') screen = <window.Newsletter />;
+    else if (active === 'sentinel') screen = <window.Sentinel />;
+    else if (active === 'time') screen = <window.Team />;
+    else screen = (
+      <Card flat style={{ display: 'grid', placeItems: 'center', minHeight: 420 }}>
+        <div style={{ textAlign: 'center' }}>
+          <h2 style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 22 }}>Configurações</h2>
+          <p style={{ color: 'var(--muted-foreground)', fontSize: 14, marginTop: 8 }}>Preferências do painel entram aqui.</p>
+        </div>
+      </Card>
+    );
+
+    const onList = !(active === 'oportunidades' && route.mode !== 'list');
+    const showNew = active === 'dashboard' || (active === 'oportunidades' && route.mode === 'list');
+    const newBtn = <Button variant="primary" iconLeft={Ic('plus', 'ico-sm')} onClick={newOpp}>Nova oportunidade</Button>;
+
+    return (
+      <window.AppShell
+        nav={D.nav} active={active} onNav={go}
+        title={TITLES[active] || 'Access+'} subtitle={onList ? SUBS[active] : null}
+        actions={showNew ? newBtn : null}
+        onLogout={() => { setAuth(false); localStorage.setItem('ap_admin_auth', '0'); }}
+      >
+        {screen}
+      </window.AppShell>
+    );
+  }
+
+  ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>

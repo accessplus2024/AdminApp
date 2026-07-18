@@ -1,0 +1,27 @@
+<!-- @dsCard group="Colors" viewport="700x210" name="Semantic & status" subtitle="shadcn aliases + functional status tokens" -->
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<link rel="stylesheet" href="../styles.css" />
+<style>
+  body { margin: 0; padding: 20px; background: var(--neutral-0); font-family: var(--font-body); }
+  .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  .sw { border-radius: var(--radius-sm); border: 1px solid var(--border); padding: 10px; height: 64px; display: flex; flex-direction: column; justify-content: space-between; }
+  .n { font-size: 11px; font-weight: 600; }
+  .v { font-family: var(--font-mono); font-size: 10px; opacity: .7; }
+</style>
+</head>
+<body>
+  <div class="grid">
+    <div class="sw" style="background:var(--primary);color:var(--primary-foreground)"><span class="n">primary</span><span class="v">--primary</span></div>
+    <div class="sw" style="background:var(--secondary);color:var(--secondary-foreground)"><span class="n">secondary</span><span class="v">--secondary</span></div>
+    <div class="sw" style="background:var(--muted);color:var(--muted-foreground)"><span class="n">muted</span><span class="v">--muted</span></div>
+    <div class="sw" style="background:var(--accent);color:var(--accent-foreground)"><span class="n">accent</span><span class="v">--accent</span></div>
+    <div class="sw" style="background:var(--destructive);color:var(--destructive-foreground)"><span class="n">destructive</span><span class="v">--destructive</span></div>
+    <div class="sw" style="background:var(--success);color:var(--success-fg)"><span class="n">success</span><span class="v">--success</span></div>
+    <div class="sw" style="background:var(--warning);color:var(--warning-fg)"><span class="n">warning</span><span class="v">--warning</span></div>
+    <div class="sw" style="background:var(--card);color:var(--card-foreground)"><span class="n">card / border</span><span class="v">--card</span></div>
+  </div>
+</body>
+</html>

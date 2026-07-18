@@ -1,0 +1,17 @@
+/* ============================================================
+   Access+Plus — Radius tokens
+   The brand is built on pills & soft, friendly geometry.
+   ============================================================ */
+
+:root {
+  --radius-xs: 0.375rem;  /* 6px  — chips, tags */
+  --radius-sm: 0.5rem;    /* 8px  — inputs, small buttons */
+  --radius-md: 0.625rem;  /* 10px — buttons */
+  --radius-lg: 0.875rem;  /* 14px — cards */
+  --radius-xl: 1.25rem;   /* 20px — large surfaces, modals */
+  --radius-2xl: 1.75rem;  /* 28px — feature panels */
+  --radius-pill: 999px;   /* full pill — logo lockups, segmented controls */
+
+  /* shadcn alias: components read --radius and derive sm/md/lg from it */
+  --radius: var(--radius-md);
+}

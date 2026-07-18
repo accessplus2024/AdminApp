@@ -1,0 +1,76 @@
+<!-- @dsCard group="Components" viewport="700x430" name="Core — Button · Badge · Avatar · Card" subtitle="Brand action controls & surfaces" -->
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<link rel="stylesheet" href="../../styles.css" />
+<style>
+  body { margin: 0; padding: 22px; background: var(--neutral-50); }
+  .demo { display: flex; flex-direction: column; gap: 18px; }
+  .grp { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .lbl { font-family: var(--font-body); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .1em; color: var(--muted-foreground); width: 100%; }
+  .ico { width: 1em; height: 1em; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+<script src="../../_ds_bundle.js"></script>
+<script type="text/babel">
+  const { Button, Badge, Avatar, Card, CardHeader, CardTitle, CardDescription, CardBody, CardFooter } = window.AccessPlusDesignSystem_ece1f0;
+  const Ic = (n) => <i data-lucide={n} className="ico"></i>;
+  function Demo() {
+    React.useEffect(() => { window.lucide && lucide.createIcons(); });
+    return (
+      <div className="demo">
+        <div className="grp">
+          <span className="lbl">Button — variants</span>
+          <Button variant="primary" iconLeft={Ic('plus')}>Nova oportunidade</Button>
+          <Button variant="secondary">Secundário</Button>
+          <Button variant="outline">Outline</Button>
+          <Button variant="ghost">Ghost</Button>
+          <Button variant="destructive">Excluir</Button>
+          <Button variant="link">Saiba mais</Button>
+        </div>
+        <div className="grp">
+          <span className="lbl">Sizes</span>
+          <Button variant="primary" size="sm">Small</Button>
+          <Button variant="primary" size="md">Medium</Button>
+          <Button variant="primary" size="lg">Large</Button>
+          <Button variant="primary" size="icon" aria-label="config">{Ic('settings')}</Button>
+          <Button variant="primary" pill>Pill</Button>
+        </div>
+        <div className="grp">
+          <span className="lbl">Badge & Avatar</span>
+          <Badge variant="success" dot>Publicada</Badge>
+          <Badge variant="warning" dot>Em revisão</Badge>
+          <Badge variant="primary">Bolsa integral</Badge>
+          <Badge variant="pink">Intercâmbio</Badge>
+          <Badge variant="mint">Mentoria</Badge>
+          <Badge variant="solid">A+</Badge>
+          <Avatar initials="AS" size="md" />
+          <Avatar initials="MJ" size="md" color="var(--grifa-topicos)" />
+        </div>
+        <Card style={{maxWidth: 340}}>
+          <CardHeader>
+            <CardTitle>Bolsa Santander Universidades</CardTitle>
+            <CardDescription>Inscrições até 30 de junho</CardDescription>
+          </CardHeader>
+          <CardBody style={{paddingTop: 8, paddingBottom: 8}}>
+            <Badge variant="lime">Graduação</Badge>
+          </CardBody>
+          <CardFooter>
+            <Button variant="primary" size="sm">Publicar</Button>
+            <Button variant="outline" size="sm">Editar</Button>
+          </CardFooter>
+        </Card>
+      </div>
+    );
+  }
+  ReactDOM.createRoot(document.getElementById('root')).render(<Demo />);
+</script>
+</body>
+</html>

@@ -1,0 +1,22 @@
+<!-- @dsCard group="Type" viewport="700x300" name="Type scale" subtitle="--text-xs → --text-4xl, display vs body" -->
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<link rel="stylesheet" href="../styles.css" />
+<style>
+  body { margin: 0; padding: 22px; background: var(--neutral-0); color: var(--ink); }
+  .line { display: flex; align-items: baseline; gap: 16px; padding: 5px 0; border-bottom: 1px dashed var(--neutral-200); }
+  .tag { font-family: var(--font-mono); font-size: 11px; color: var(--muted-foreground); width: 130px; flex: none; }
+  .spec { font-family: var(--font-display); font-weight: 700; color: var(--ink); white-space: nowrap; }
+</style>
+</head>
+<body>
+  <div class="line"><span class="tag">4xl · 48 / display</span><span class="spec" style="font-size:48px">Oportunidade</span></div>
+  <div class="line"><span class="tag">2xl · 28 / display</span><span class="spec" style="font-size:28px">Oportunidade</span></div>
+  <div class="line"><span class="tag">xl · 22 / display</span><span class="spec" style="font-size:22px">Oportunidade</span></div>
+  <div class="line"><span class="tag">md · 16 / body</span><span class="spec" style="font-size:16px;font-family:var(--font-body);font-weight:400">Oportunidade</span></div>
+  <div class="line"><span class="tag">base · 14 / body</span><span class="spec" style="font-size:14px;font-family:var(--font-body);font-weight:400">Oportunidade aberta</span></div>
+  <div class="line"><span class="tag">xs · 12 / body</span><span class="spec" style="font-size:12px;font-family:var(--font-body);font-weight:500">Oportunidade aberta</span></div>
+</body>
+</html>

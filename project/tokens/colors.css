@@ -1,0 +1,92 @@
+/* ============================================================
+   Access+Plus — Color tokens
+   Brand palette uses the "exam stationery" naming from the
+   brand book (caneta = pen, grifa = highlighter, etc).
+   Base values + semantic (shadcn-compatible) aliases.
+   ============================================================ */
+
+:root {
+  /* ---- Brand core (named after vestibular exam stationery) ---- */
+  --azul: #4101f6;        /* caneta azul vestibular  — primary brand blue/violet */
+  --ink: #0e0033;         /* caneta preta vestibular — near-black indigo ink     */
+  --vermelha: #fe4633;    /* caneta vermelha vestibular — alert / destructive    */
+  --corretivo: #f9f9f9;   /* corretivo apaga caneta — paper / off-white          */
+  --grifa-texto: #cff665; /* grifa texto — lime highlighter                       */
+  --grifa-topicos: #f239a7;/* grifa tópicos — pink highlighter                    */
+  --citacoes: #9cf0e3;    /* citações — mint                                      */
+
+  /* ---- Brand tints (subtle backgrounds derived from core) ---- */
+  --azul-soft: #ece8ff;
+  --azul-100: #ddd5ff;
+  --vermelha-soft: #ffe6e2;
+  --lime-soft: #f2fbd4;
+  --pink-soft: #fde0f0;
+  --mint-soft: #e2faf4;
+
+  /* ---- Neutral scale (cool, tinted toward the indigo ink) ---- */
+  --neutral-0:   #ffffff;
+  --neutral-50:  #f9f9fb;
+  --neutral-100: #f1f1f5;
+  --neutral-200: #e5e4ec;
+  --neutral-300: #d2d0de;
+  --neutral-400: #a9a7bd;
+  --neutral-500: #7c7a92;
+  --neutral-600: #565471;
+  --neutral-700: #3a3857;
+  --neutral-800: #211e40;
+  --neutral-900: #140d33;
+  --neutral-950: #0e0033;
+
+  /* ---- Functional status (derived; brand has no native green) ---- */
+  --success: #1f9e6a;
+  --success-fg: #ffffff;
+  --warning: #f7a01b;
+  --warning-fg: #2a1a00;
+
+  /* ============================================================
+     Semantic aliases — shadcn/ui contract
+     ============================================================ */
+  --background: var(--neutral-50);
+  --foreground: var(--ink);
+
+  --card: var(--neutral-0);
+  --card-foreground: var(--ink);
+
+  --popover: var(--neutral-0);
+  --popover-foreground: var(--ink);
+
+  --primary: var(--azul);
+  --primary-foreground: #ffffff;
+
+  --secondary: var(--neutral-100);
+  --secondary-foreground: var(--ink);
+
+  --muted: var(--neutral-100);
+  --muted-foreground: var(--neutral-500);
+
+  --accent: var(--neutral-100);
+  --accent-foreground: var(--ink);
+
+  --destructive: var(--vermelha);
+  --destructive-foreground: #ffffff;
+
+  --border: var(--neutral-200);
+  --input: var(--neutral-200);
+  --ring: var(--azul);
+
+  /* Sidebar (admin shell) */
+  --sidebar: var(--ink);
+  --sidebar-foreground: #cfcde0;
+  --sidebar-muted: #8e8baf;
+  --sidebar-accent: rgba(255, 255, 255, 0.08);
+  --sidebar-active: var(--azul);
+  --sidebar-active-foreground: #ffffff;
+  --sidebar-border: rgba(255, 255, 255, 0.08);
+
+  /* Charts / data viz (brand-led categorical ramp) */
+  --chart-1: var(--azul);
+  --chart-2: var(--grifa-topicos);
+  --chart-3: var(--citacoes);
+  --chart-4: var(--grifa-texto);
+  --chart-5: var(--vermelha);
+}

@@ -1,0 +1,11 @@
+node_modules
+dist
+.env
+.env.local
+.env.*.local
+.agents/skills
+.claude/skills
+package-lock.json
+skills-lock.json
+client_secret.json
+

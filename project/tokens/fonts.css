@@ -1,0 +1,10 @@
+/* ============================================================
+   Access+Plus — Webfonts
+   Brand spec: Titles = "Futura Std", Body = "Poppins Light".
+   Futura Std is a licensed Adobe face and is NOT free to ship,
+   so it is substituted with **Jost** (Google Fonts) — a
+   geometric sans cut in the Futura tradition. Swap back to a
+   licensed Futura Std @font-face when binaries are available.
+   ============================================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=Jost:wght@400;500;600;700;800;900&family=Poppins:wght@300;400;500;600;700&display=swap');

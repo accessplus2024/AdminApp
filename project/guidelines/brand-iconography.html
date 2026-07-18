@@ -1,0 +1,36 @@
+<!-- @dsCard group="Brand" viewport="700x170" name="Iconography" subtitle="Lucide (shadcn set) · UI glyphs + white-on-azul feature tiles" -->
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<link rel="stylesheet" href="../styles.css" />
+<style>
+  body { margin: 0; padding: 22px; background: var(--neutral-0); }
+  .row { display: flex; gap: 14px; align-items: center; }
+  .tile { width: 60px; height: 60px; border-radius: var(--radius-md); background: var(--azul); color: #fff; display: flex; align-items: center; justify-content: center; }
+  .tile svg { width: 30px; height: 30px; }
+  .sep { width: 1px; height: 44px; background: var(--border); margin: 0 6px; }
+  .ui { color: var(--ink); display: flex; gap: 16px; align-items: center; }
+  .ui svg { width: 22px; height: 22px; }
+</style>
+</head>
+<body>
+  <div class="row">
+    <div class="tile"><i data-lucide="graduation-cap"></i></div>
+    <div class="tile"><i data-lucide="award"></i></div>
+    <div class="tile"><i data-lucide="flag"></i></div>
+    <div class="tile"><i data-lucide="languages"></i></div>
+    <div class="sep"></div>
+    <div class="ui">
+      <i data-lucide="search"></i>
+      <i data-lucide="bell"></i>
+      <i data-lucide="settings"></i>
+      <i data-lucide="users"></i>
+      <i data-lucide="calendar"></i>
+      <i data-lucide="chevron-down"></i>
+    </div>
+  </div>
+  <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+  <script>lucide.createIcons();</script>
+</body>
+</html>

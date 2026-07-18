@@ -1,0 +1,32 @@
+<!-- @dsCard group="Colors" viewport="700x180" name="Brand core" subtitle="caneta azul / preta / vermelha — the action + ink + alert trio" -->
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<link rel="stylesheet" href="../styles.css" />
+<style>
+  body { margin: 0; padding: 20px; background: var(--neutral-0); }
+  .row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  .sw { border-radius: var(--radius-lg); padding: 14px; height: 116px; display: flex; flex-direction: column; justify-content: space-between; border: 1px solid var(--border); }
+  .name { font-family: var(--font-body); font-weight: 600; font-size: 13px; }
+  .meta { font-family: var(--font-mono); font-size: 11px; opacity: .8; }
+  .pt { font-family: var(--font-body); font-size: 11px; opacity: .7; }
+</style>
+</head>
+<body>
+  <div class="row">
+    <div class="sw" style="background: var(--azul); color: #fff;">
+      <div class="name">azul</div>
+      <div><div class="pt">caneta azul vestibular</div><div class="meta">#4101F6 · --azul</div></div>
+    </div>
+    <div class="sw" style="background: var(--ink); color: #fff;">
+      <div class="name">ink</div>
+      <div><div class="pt">caneta preta vestibular</div><div class="meta">#0E0033 · --ink</div></div>
+    </div>
+    <div class="sw" style="background: var(--vermelha); color: #fff;">
+      <div class="name">vermelha</div>
+      <div><div class="pt">caneta vermelha vestibular</div><div class="meta">#FE4633 · --vermelha</div></div>
+    </div>
+  </div>
+</body>
+</html>
