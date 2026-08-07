@@ -118,6 +118,10 @@ function scorePost(post) {
   return points;
 }
 
+export function discoveryScreeningStatus(score) {
+  return Number(score) >= SCORE_THRESHOLD ? 'queued' : 'rejected';
+}
+
 function extractUrl(value) {
   return String(value || '').match(/https?:\/\/[^\s\)"]+/)?.[0] || null;
 }
@@ -570,7 +574,8 @@ async function runDiscovery(supabase, maxCandidates, runId) {
     const { error } = await supabase.from('sentinel_posts').insert(scored.map((post) => ({
       source_url: post.sourceUrl, source_type: 'instagram', owner_username: post.ownerUsername,
       caption: post.caption, posted_at: post.timestamp, score: post.score, run_id: runId,
-      status: post.score >= SCORE_THRESHOLD ? 'queued' : 'screened_out',
+      status: discoveryScreeningStatus(post.score),
+      error: post.score >= SCORE_THRESHOLD ? null : `Rejeitada na triagem automática: pontuação ${post.score} abaixo do corte ${SCORE_THRESHOLD}.`,
       processed_at: post.score >= SCORE_THRESHOLD ? null : new Date().toISOString(),
     })));
     if (error) throw error;

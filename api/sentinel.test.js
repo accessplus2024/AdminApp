@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  canonicalizeOpportunityUrl, discoveryCandidateLimit, expiredStatusChange, extractAdjacentLinks, isDuplicateOpportunity,
+  canonicalizeOpportunityUrl, discoveryCandidateLimit, discoveryScreeningStatus, expiredStatusChange, extractAdjacentLinks, isDuplicateOpportunity,
   isPastDate, isPortugueseCatalogValue, normalizeDeadlineOutput, opportunityDiscoveryKey,
   parseDateParts, validateFieldEvidence,
 } from './sentinel';
@@ -13,6 +13,13 @@ describe('discoveryCandidateLimit', () => {
   test('mantém o limite legado para chamadas parciais', () => {
     expect(discoveryCandidateLimit({ maxCandidates: 100 })).toBe(25);
     expect(discoveryCandidateLimit({})).toBe(10);
+  });
+});
+
+describe('discoveryScreeningStatus', () => {
+  test('usa rejeitada como o único estado terminal da triagem automática', () => {
+    expect(discoveryScreeningStatus(3)).toBe('rejected');
+    expect(discoveryScreeningStatus(4)).toBe('queued');
   });
 });
 

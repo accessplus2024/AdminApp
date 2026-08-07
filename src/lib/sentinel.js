@@ -3,7 +3,6 @@ import { isSupabaseConfigured, supabase } from './supabase';
 export const SENTINEL_STATUS = {
   queued: { label: 'Na fila', variant: 'neutral' },
   pending: { label: 'Processando', variant: 'primary' },
-  screened_out: { label: 'Fora do corte', variant: 'neutral' },
   qualified: { label: 'Qualificada', variant: 'success' },
   duplicate: { label: 'Duplicada', variant: 'neutral' },
   rejected: { label: 'Rejeitada', variant: 'warning' },
