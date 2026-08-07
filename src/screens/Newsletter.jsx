@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Badge, Button, Card, CardBody, CardHeader, CardTitle, Input, Select, Tabs, Textarea } from '../components';
+import { Badge, Button, Card, CardBody, CardHeader, CardTitle, Input, OpportunityFilters, Select, Tabs, Textarea, useOpportunityFilters } from '../components';
 import { Ic } from '../lib/icons';
 import { buildNewsletterHtml, slugify } from '../lib/newsletterHtml';
 import {
@@ -76,7 +76,6 @@ export default function Newsletter({ opportunities, perms }) {
   const [issue, setIssue] = useState(blankIssue);
   const [entries, setEntries] = useState([]);
   const [featured, setFeatured] = useState({});
-  const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState(null);
@@ -98,14 +97,11 @@ export default function Newsletter({ opportunities, perms }) {
   useEffect(() => { refresh(); }, []);
 
   const publishedOpportunities = useMemo(() => (opportunities || []).filter((opportunity) => opportunity.status === 'Publicada'), [opportunities]);
+  const opportunityFilter = useOpportunityFilters(publishedOpportunities);
   const selectedIds = useMemo(() => new Set(entries.map((entry) => String(entry.opportunity_id))), [entries]);
-  const available = useMemo(() => {
-    const query = search.trim().toLocaleLowerCase('pt-BR');
-    return publishedOpportunities
-      .filter((opportunity) => !selectedIds.has(String(opportunity._raw?.id || opportunity.id)))
-      .filter((opportunity) => !query || `${opportunity.titulo} ${opportunity.descricao} ${opportunity.tipo}`.toLocaleLowerCase('pt-BR').includes(query))
-      .slice(0, 60);
-  }, [publishedOpportunities, search, selectedIds]);
+  const available = useMemo(() => opportunityFilter.rows
+    .filter((opportunity) => !selectedIds.has(String(opportunity._raw?.id || opportunity.id)))
+    .slice(0, 60), [opportunityFilter.rows, selectedIds]);
 
   const html = useMemo(() => buildNewsletterHtml(issue, entries), [issue, entries]);
   const patchIssue = (key, value) => setIssue((current) => ({
@@ -257,7 +253,7 @@ export default function Newsletter({ opportunities, perms }) {
           <Card>
             <CardHeader><CardTitle style={{ fontSize: 16 }}>Catálogo aprovado</CardTitle><p className="card-helper">Só oportunidades publicadas aparecem aqui. Adicionar não muda sua exibição no site.</p></CardHeader>
             <CardBody>
-              <Input icon={Ic('search', 'ico-sm')} value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar oportunidade" />
+              <OpportunityFilters controller={opportunityFilter} total={publishedOpportunities.length} compact placeholder="Buscar no catálogo aprovado…" />
               <div className="opportunity-palette-list">
                 {available.length === 0 ? <div className="workflow-empty">Nenhuma oportunidade disponível para este filtro.</div> : available.map((opportunity) => {
                   const id = opportunity._raw?.id || opportunity.id;

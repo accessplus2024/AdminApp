@@ -71,21 +71,41 @@ export default function App() {
     return VALID_SCREENS.includes(s) ? s : 'dashboard';
   });
   const [route, setRoute]   = useState({ mode: 'list', opp: null });
-  const [, setTick]         = useState(0);
-  const rerender = () => setTick((t) => t + 1);
+  const [opportunities, setOpportunities] = useState(() => D.opportunities.slice());
+  const [opportunitiesLoading, setOpportunitiesLoading] = useState(isSupabaseConfigured);
+  const rerender = () => setOpportunities(D.opportunities.slice());
+
+  const syncOpportunities = (lista) => {
+    D.opportunities.length = 0;
+    D.opportunities.push(...lista);
+    setOpportunities(lista.slice());
+  };
+
+  const reloadOpportunities = async () => {
+    if (!isSupabaseConfigured) {
+      rerender();
+      return D.opportunities.slice();
+    }
+    setOpportunitiesLoading(true);
+    try {
+      const lista = await fetchOpportunities({ throwOnError: true });
+      syncOpportunities(lista);
+      return lista;
+    } finally {
+      setOpportunitiesLoading(false);
+    }
+  };
 
   // Ao abrir o app, tenta carregar as oportunidades REAIS do Supabase.
   // Se conseguir, substitui os dados de exemplo (mock) que ja estao em D.
   // Se nao estiver configurado (ou der erro), o app segue com o mock.
   useEffect(() => {
     let ativo = true;
-    fetchOpportunities().then((lista) => {
-      if (ativo && lista.length) {
-        D.opportunities.length = 0;         // esvazia o mock
-        D.opportunities.push(...lista);      // coloca os dados reais
-        rerender();                          // redesenha as telas
-      }
-    });
+    if (!isSupabaseConfigured) return () => { ativo = false; };
+    fetchOpportunities({ throwOnError: true })
+      .then((lista) => { if (ativo) syncOpportunities(lista); })
+      .catch((error) => console.error('[Access+] Erro ao sincronizar o catálogo:', error.message))
+      .finally(() => { if (ativo) setOpportunitiesLoading(false); });
     return () => { ativo = false; };
   }, []);
 
@@ -215,9 +235,9 @@ export default function App() {
         />
       );
   } else if (active === 'sentinel') {
-    screen = <Sentinel perms={perms} />;
+    screen = <Sentinel perms={perms} opportunities={opportunities} catalogLoading={opportunitiesLoading} onCatalogChanged={reloadOpportunities} />;
   } else if (active === 'newsletter') {
-    screen = <Newsletter opportunities={D.opportunities} perms={perms} />;
+    screen = <Newsletter opportunities={opportunities} perms={perms} />;
   } else if (active === 'time') {
     screen = <Team perms={perms} />;
   } else {

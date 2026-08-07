@@ -5,13 +5,14 @@ import { mapOpportunities, mapOpportunity } from './mapOpportunity';
 // ---------------------------------------------------------------------------
 // LEITURA
 // ---------------------------------------------------------------------------
-export async function fetchOpportunities() {
+export async function fetchOpportunities({ throwOnError = false } = {}) {
   if (!isSupabaseConfigured) return [];
   const { data, error } = await supabase
     .from('opportunities')
     .select('*')
     .order('created_at', { ascending: false });
   if (error) {
+    if (throwOnError) throw new Error(error.message);
     console.error('[Access+] Erro ao ler oportunidades do Supabase:', error.message);
     return [];
   }
@@ -24,8 +25,8 @@ export async function fetchOpportunities() {
 const splitCommas = (s) => String(s || '').split(',').map((x) => x.trim()).filter(Boolean);
 
 // status da UI ('Publicada'/'Rascunho'/'Aprovada'/'Em revisão') -> status do banco.
-function statusParaBanco(ui) {
-  if (ui === 'Publicada' || ui === 'Aprovada') return 'Aprovada';
+function statusParaBanco(ui, inscricoesAbertas) {
+  if (ui === 'Publicada' || ui === 'Aprovada') return inscricoesAbertas === false ? 'Encerrada' : 'Aprovada';
   return 'Revisar';   // 'Rascunho' / 'Em revisão' / qualquer outro
 }
 
@@ -59,7 +60,7 @@ export function formParaLinha(form, uiStatus, existente = null) {
           .map((r) => ({ platform: r.plataforma || '', label: r.titulo || '', url: r.meta || '' }))
           .filter((r) => r.url || r.label)
       : (ex.resources || []),
-    status: statusParaBanco(uiStatus),
+    status: statusParaBanco(uiStatus, form.inscricoesAbertas),
   };
 }
 

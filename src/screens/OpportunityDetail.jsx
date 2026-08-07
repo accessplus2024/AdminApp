@@ -5,6 +5,7 @@ import D from '../lib/data';
 import { fetchComments, deleteComment } from '../lib/comments';
 import { isSupabaseConfigured } from '../lib/supabase';
 import { idDoBanco } from '../lib/opportunities';
+import { availabilityVariant, OPPORTUNITY_AVAILABILITY, opportunityAvailability } from '../lib/opportunityAvailability';
 
 const PLAT = {
   youtube:   { label: 'YouTube',   icon: 'youtube',        color: '#FF0000' },
@@ -70,6 +71,7 @@ export default function OpportunityDetail({ opp, onBack, onEdit, onDelete, onTog
   };
 
   const published = opp.status === 'Publicada';
+  const availability = opportunityAvailability(opp);
   const para = { fontSize: 14.5, lineHeight: 1.6, color: 'var(--neutral-700)' };
 
   return (
@@ -111,9 +113,9 @@ export default function OpportunityDetail({ opp, onBack, onEdit, onDelete, onTog
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7 }}>
             <Badge variant={D.tipoVariant[opp.tipo] || 'neutral'}>{opp.tipo}</Badge>
             <Badge variant={D.custoVariant[opp.custo] || 'neutral'}>{opp.custo}</Badge>
-            <Badge variant={opp.inscricoesAbertas ? 'success' : 'neutral'} dot>
-              {opp.inscricoesAbertas ? 'Inscrições abertas' : 'Inscrições fechadas'}
-            </Badge>
+            {availability !== OPPORTUNITY_AVAILABILITY.UNKNOWN && availability !== opp.status && (
+              <Badge variant={availabilityVariant(opp)} dot>{availability}</Badge>
+            )}
             {opp.interesse.map((i) => <Badge key={i} variant="lime">{i}</Badge>)}
           </div>
         </CardBody>

@@ -16,7 +16,7 @@ const STATUS_UI = {
   Aprovada: 'Publicada',
   Revisar: 'Em revisão',
   Rascunho: 'Rascunho',
-  Encerrada: 'Encerrada',
+  Encerrada: 'Inscrições encerradas',
 };
 
 // resources (jsonb) do banco -> recursos que a tela de detalhe mostra.
@@ -67,7 +67,9 @@ export function mapOpportunity(row) {
 
     // status / estado
     status: STATUS_UI[status] || status || 'Rascunho',
-    inscricoesAbertas: status === 'Aprovada',
+    // Disponibilidade não é o mesmo que fluxo editorial. Itens em revisão
+    // ficam sem disponibilidade conhecida, em vez de serem tratados como fechados.
+    inscricoesAbertas: status === 'Aprovada' ? true : status === 'Encerrada' ? false : null,
     destaque: false,
 
     // detalhe

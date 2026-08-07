@@ -21,7 +21,7 @@ const D = {
       'Olimpíadas Científicas', 'MUNs', 'Programas Acadêmicos', 'Programas de Intercâmbio',
       'Bolsas de Estudo', 'Competições', 'Competições de Escrita', 'Mentorias',
     ] },
-    { key: 'inscricoes', label: 'Inscrições abertas', type: 'radio', options: ['Sim', 'Não'] },
+    { key: 'inscricoes', label: 'Disponibilidade', type: 'radio', options: ['Inscrições abertas', 'Inscrições encerradas'] },
     { key: 'nivel', label: 'Nível', type: 'check', options: ['Fundamental', 'Ensino Médio', 'Gap'] },
     { key: 'publico', label: 'Público-alvo', type: 'check', options: [
       'Negros', 'LGBT', 'Baixa Renda', 'Indígenas', 'Deficientes', 'Meninas', 'Escola Pública',
@@ -40,7 +40,7 @@ const D = {
   activity: [],
 
   statusVariant: {
-    'Publicada': 'success', 'Em revisão': 'warning', 'Rascunho': 'neutral', 'Encerrada': 'danger',
+    'Publicada': 'success', 'Em revisão': 'warning', 'Rascunho': 'neutral', 'Inscrições encerradas': 'danger',
     'Ativo': 'success', 'Convite pendente': 'warning', 'Inativo': 'neutral',
   },
   papelVariant: { 'Admin': 'primary', 'Editor': 'mint', 'Analista': 'pink', 'Viewer': 'neutral' },

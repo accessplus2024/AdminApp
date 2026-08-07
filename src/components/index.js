@@ -12,3 +12,4 @@ export { Dialog } from './Dialog';
 export { Tabs } from './Tabs';
 export { Table } from './Table';
 export { Stat } from './Stat';
+export { OpportunityFilters, useOpportunityFilters, filterAndSortOpportunities, emptyOpportunityFilters } from './OpportunityFilters';
