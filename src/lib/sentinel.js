@@ -75,7 +75,7 @@ async function callSentinel(body) {
   return result;
 }
 
-export const runSentinel = (maxCandidates = 10) => callSentinel({ action: 'run', maxCandidates });
+export const runSentinel = ({ allQueued = false, maxCandidates = 10 } = {}) => callSentinel({ action: 'run', allQueued, maxCandidates });
 export const addManualOpportunity = (url) => callSentinel({ action: 'add', url });
 
 const chunks = (items, size) => Array.from({ length: Math.ceil(items.length / size) }, (_, index) => items.slice(index * size, index * size + size));

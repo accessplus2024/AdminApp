@@ -1,9 +1,20 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  canonicalizeOpportunityUrl, expiredStatusChange, extractAdjacentLinks, isDuplicateOpportunity,
+  canonicalizeOpportunityUrl, discoveryCandidateLimit, expiredStatusChange, extractAdjacentLinks, isDuplicateOpportunity,
   isPastDate, isPortugueseCatalogValue, normalizeDeadlineOutput, opportunityDiscoveryKey,
   parseDateParts, validateFieldEvidence,
 } from './sentinel';
+
+describe('discoveryCandidateLimit', () => {
+  test('processa toda a fila em uma única execução quando solicitado', () => {
+    expect(discoveryCandidateLimit({ allQueued: true, maxCandidates: 1 })).toBe(500);
+  });
+
+  test('mantém o limite legado para chamadas parciais', () => {
+    expect(discoveryCandidateLimit({ maxCandidates: 100 })).toBe(25);
+    expect(discoveryCandidateLimit({})).toBe(10);
+  });
+});
 
 describe('Sentinel catalog evidence validation', () => {
   test('formats Portuguese dates without a leading zero', () => {

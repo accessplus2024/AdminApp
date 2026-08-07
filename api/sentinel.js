@@ -14,6 +14,7 @@ const MODEL = MODELS.join(' -> ');
 const MODEL_TIMEOUT_MS = Math.max(10_000, Math.min(Number(process.env.SENTINEL_MODEL_TIMEOUT_MS) || 45_000, 120_000));
 const MAX_ADJACENT_PAGES = Math.max(0, Math.min(Number(process.env.SENTINEL_ADJACENT_PAGES) || 2, 4));
 const SOURCE_CHAR_LIMIT = Math.max(12_000, Math.min(Number(process.env.SENTINEL_SOURCE_CHAR_LIMIT) || 24_000, 40_000));
+const MAX_DISCOVERY_CANDIDATES = 500;
 const CATALOG_PROMPT_VERSION = 'catalog-review-v5';
 const DISCOVERY_PROMPT_VERSION = 'discovery-v2';
 const SCORE_THRESHOLD = 4;
@@ -614,6 +615,11 @@ async function runDiscovery(supabase, maxCandidates, runId) {
   };
 }
 
+export function discoveryCandidateLimit(body = {}) {
+  if (body.allQueued === true) return MAX_DISCOVERY_CANDIDATES;
+  return Math.max(1, Math.min(Number(body.maxCandidates) || 10, 25));
+}
+
 function catalogReviewPrompt(opportunity) {
   const today = new Date().toISOString().slice(0, 10);
   return `Você audita uma oportunidade já publicada no catálogo Access+. Hoje é ${today}. Compare os dados atuais com as fontes oficiais fornecidas. Baseie tudo SOMENTE no conteúdo das fontes; não invente nem complete por conhecimento prévio.\n\nREGRAS OBRIGATÓRIAS PARA PRAZOS:\n1. "deadline" é exclusivamente a data limite para enviar candidatura, inscrição, projeto ou indicação.\n2. Data do evento, competição, cerimônia, resultado, viagem, início do programa, pagamento ou rodada NÃO é deadline. Frases como "will be held on", "takes place on", "event date" e "finals are on" nunca comprovam prazo.\n3. Só proponha deadline quando a citação disser explicitamente deadline, applications close/due, registration closes/ends, submit by, register by, inscrições até, encerramento das inscrições, prazo ou expressão equivalente.\n4. Não infira um prazo a partir do calendário. Se não houver data limite explícita, não altere deadline.\n5. Prefira o ciclo atual ou futuro. Não misture datas de edições diferentes.\n6. Se houver dia, mês e ano, use exatamente "DD de mês de YYYY". Nunca troque um prazo específico por apenas um mês.\n7. Se o prazo confirmado já passou, inclua também status "Encerrada". Se a fonte disser explicitamente que as inscrições estão fechadas, proponha status "Encerrada" mesmo sem uma data.\n\nIDIOMA, CONDIÇÕES E TAXONOMIA:\n- Todos os valores de updates devem estar em português brasileiro. Traduza custos, critérios, formatos e descrições. Preserve em inglês apenas nomes próprios e URLs.\n- Em cost, preserve condições e etapas: diferencie taxa de candidatura da taxa cobrada apenas de finalistas ou participantes.\n- Em location, diferencie candidatura remota de evento ou final presencial. Uma sede presencial não prova que a candidatura deixou de ser remota; quando ambos forem relevantes, descreva as duas etapas.\n- areas aceita somente: STEM, Humanas, Meio Ambiente, Linguagens, Artes. Classifique pelo tema da oportunidade, não pelas modalidades de envio.\n- level aceita somente: Ensino Médio, Fundamental, Gap Year.\n- audience aceita somente: Meninas, Escola Pública, Indígenas, Deficientes, Negros, LGBT, Baixa Renda.\n- type aceita somente: Programas Acadêmicos, Olimpíadas Científicas, Competições, Competições de Escrita, Mentorias, Bolsas de Estudo, Programas de Intercâmbio, MUNs, Estágios.\n\nVocê também pode corrigir outros campos quando houver evidência clara. Campos permitidos: ${REVIEW_FIELDS.join(', ')}.\n\nCada campo alterado DEVE ter evidência estruturada com uma citação literal copiada de uma das fontes e a URL exata dessa fonte. A citação permanece no idioma original da fonte; apenas o valor proposto deve estar em português. Para deadline, use kind "application_deadline"; para inscrições contínuas, "rolling_deadline".\n\nResponda SOMENTE com JSON cru:\n{"updates":{"deadline":"17 de agosto de 2026"},"evidence":{"deadline":{"quote":"Applications close on 17 August 2026","source_url":"https://exemplo.org/apply","kind":"application_deadline"}},"notes":"observação curta em português"}\nInclua em updates apenas campos que realmente devem mudar. Se nada mudar: {"updates":{},"evidence":{},"notes":"Dados atuais confirmados"}.\n\nDados atuais:\n${JSON.stringify(Object.fromEntries(REVIEW_FIELDS.map((field) => [field, opportunity[field]])))}`;
@@ -949,8 +955,8 @@ export default async function handler(req, res) {
     const user = await authorize(req, supabase);
     const action = req.body?.action;
     if (action === 'run') {
-      const limit = Math.max(1, Math.min(Number(req.body?.maxCandidates) || 10, 25));
-      run = await createRun(supabase, user, 'discovery', 0);
+      const limit = discoveryCandidateLimit(req.body);
+      run = await createRun(supabase, user, 'discovery', 0, { all_queued: req.body?.allQueued === true });
       const outcome = await runDiscovery(supabase, limit, run.id);
       const result = { processed: outcome.response.candidates, succeeded: outcome.response.candidates - outcome.response.failed, failed: outcome.response.failed };
       await finalizeRun(supabase, run.id, result, outcome.metrics);
