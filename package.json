@@ -6,13 +6,16 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "test": "bun test",
     "preview": "vite preview"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.0",
     "@supabase/supabase-js": "^2.110.2",
+    "apify-client": "^2.24.0",
     "googleapis": "^144.0.0",
     "lucide-react": "^0.460.0",
+    "openai": "^7.4.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },

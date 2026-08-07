@@ -1,281 +1,287 @@
-import { Card, CardHeader, CardTitle, CardBody, Badge, Button, Tabs, Table, Select } from '../components';
+import { useEffect, useMemo, useState } from 'react';
+import { Badge, Button, Card, CardBody, CardHeader, CardTitle, Input, Select, Tabs, Textarea } from '../components';
 import { Ic } from '../lib/icons';
-import { useState, useEffect, useMemo } from 'react';
-import { fetchBeehiivPosts } from '../lib/beehiiv';
-import { fetchApprovedOpportunities } from '../lib/sheets';
-import { buildNewsletterHtml } from '../lib/newsletterHtml';
-import D from '../lib/data';
+import { buildNewsletterHtml, slugify } from '../lib/newsletterHtml';
+import {
+  DEFAULT_ISSUE,
+  deleteNewsletterIssue,
+  fetchLastFeaturedDates,
+  fetchNewsletterIssues,
+  markNewsletterPublished,
+  opportunityToNewsletterEntry,
+  saveNewsletterIssue,
+} from '../lib/newsletters';
 
-function Account({ a, on, onToggle }) {
+const ISSUE_STATUS = {
+  draft: { label: 'Rascunho', variant: 'neutral' },
+  ready: { label: 'Pronta', variant: 'primary' },
+  published: { label: 'Enviada', variant: 'success' },
+};
+
+const formatDate = (value, withTime = false) => value
+  ? new Intl.DateTimeFormat('pt-BR', withTime
+    ? { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }
+    : { day: '2-digit', month: 'short', year: 'numeric' }).format(new Date(value))
+  : '—';
+
+function blankIssue() {
+  const now = new Date();
+  return {
+    ...DEFAULT_ISSUE,
+    title: `Weekly Drop · ${new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: 'short' }).format(now)}`,
+    campaign_slug: `weekly-drop-${now.toISOString().slice(0, 10)}`,
+  };
+}
+
+function Field({ label, hint, children }) {
   return (
-    <button type="button" onClick={onToggle}
-      style={{
-        display: 'flex', alignItems: 'center', gap: 9, padding: '7px 12px 7px 8px',
-        borderRadius: 'var(--radius-pill)', cursor: 'pointer',
-        border: '1px solid ' + (on ? 'var(--azul)' : 'var(--border)'),
-        background: on ? 'var(--azul-soft)' : 'var(--card)',
-      }}>
-      <span style={{ width: 26, height: 26, borderRadius: '50%', background: a.cor, color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-display)' }}>
-        {a.nome.charAt(0)}
-      </span>
-      <span style={{ fontSize: 13, fontWeight: 600, color: on ? 'var(--azul)' : 'var(--ink)' }}>{a.handle}</span>
-      {on && <span style={{ color: 'var(--azul)' }}>{Ic('check', 'ico-xs')}</span>}
-    </button>
+    <label className="newsletter-field">
+      <span>{label}</span>
+      {children}
+      {hint && <small>{hint}</small>}
+    </label>
   );
 }
 
-export default function Newsletter() {
-
-  const [beehiivPosts, setBeehiivPosts] = useState([]);
-  useEffect(() => {
-  fetchBeehiivPosts(10)
-    .then((data) => setBeehiivPosts(data.data || []))
-    .catch((err) => console.error('Beehiiv fetch failed:', err));
-}, []);
-
-  // Oportunidades aprovadas na planilha de revisão do Sentinel.
-  const [approved, setApproved] = useState([]);
-  const [approvedLoading, setApprovedLoading] = useState(true);
-  const [contaFiltro, setContaFiltro] = useState('todas');
-  const [copyStatus, setCopyStatus] = useState('idle'); // idle | copied | error
-  useEffect(() => {
-    fetchApprovedOpportunities()
-      .then(setApproved)
-      .finally(() => setApprovedLoading(false));
-  }, []);
-
-  const contasAprovadas = useMemo(
-    () => Array.from(new Set(approved.map((o) => o.instaAccount).filter(Boolean))).sort(),
-    [approved]
+function EntryEditor({ entry, index, total, onChange, onMove, onRemove }) {
+  const patch = (key, value) => onChange(index, { ...entry, [key]: value });
+  return (
+    <details className="newsletter-entry-editor">
+      <summary>
+        <span className="publication-number">{String(index + 1).padStart(2, '0')}</span>
+        <span className="publication-title">{entry.title || 'Sem título'}</span>
+        <span className="publication-actions" onClick={(event) => event.preventDefault()}>
+          <button type="button" onClick={() => onMove(index, -1)} disabled={index === 0} aria-label="Mover para cima">{Ic('arrow-up', 'ico-xs')}</button>
+          <button type="button" onClick={() => onMove(index, 1)} disabled={index === total - 1} aria-label="Mover para baixo">{Ic('arrow-down', 'ico-xs')}</button>
+          <button type="button" onClick={() => onRemove(index)} aria-label="Remover">{Ic('x', 'ico-xs')}</button>
+        </span>
+      </summary>
+      <div className="newsletter-entry-fields">
+        <Field label="Título"><Input value={entry.title} onChange={(event) => patch('title', event.target.value)} /></Field>
+        <Field label="Resumo"><Textarea value={entry.summary} onChange={(event) => patch('summary', event.target.value)} rows={4} /></Field>
+        <Field label="Elegibilidade"><Textarea value={entry.eligibility} onChange={(event) => patch('eligibility', event.target.value)} rows={3} /></Field>
+        <div className="newsletter-two-fields">
+          <Field label="Prazo"><Input value={entry.deadline} onChange={(event) => patch('deadline', event.target.value)} /></Field>
+          <Field label="Taxas"><Input value={entry.fees} onChange={(event) => patch('fees', event.target.value)} /></Field>
+        </div>
+        <Field label="Link"><Input type="url" value={entry.link} onChange={(event) => patch('link', event.target.value)} /></Field>
+      </div>
+    </details>
   );
-  const approvedFiltradas = useMemo(
-    () => (contaFiltro === 'todas' ? approved : approved.filter((o) => o.instaAccount === contaFiltro)),
-    [approved, contaFiltro]
-  );
+}
 
-  const copiarHtml = async () => {
+export default function Newsletter({ opportunities, perms }) {
+  const [tab, setTab] = useState('editor');
+  const [issues, setIssues] = useState([]);
+  const [issue, setIssue] = useState(blankIssue);
+  const [entries, setEntries] = useState([]);
+  const [featured, setFeatured] = useState({});
+  const [search, setSearch] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [notice, setNotice] = useState(null);
+
+  const refresh = async (preferredId) => {
     try {
-      const html = buildNewsletterHtml(approvedFiltradas);
-      await navigator.clipboard.writeText(html);
-      setCopyStatus('copied');
-      setTimeout(() => setCopyStatus('idle'), 2500);
-    } catch (err) {
-      console.error('Falha ao copiar HTML da newsletter:', err);
-      setCopyStatus('error');
-      setTimeout(() => setCopyStatus('idle'), 2500);
-    }
+      const [nextIssues, nextFeatured] = await Promise.all([fetchNewsletterIssues(), fetchLastFeaturedDates()]);
+      setIssues(nextIssues);
+      setFeatured(nextFeatured);
+      const selected = nextIssues.find((item) => item.id === preferredId)
+        || nextIssues.find((item) => item.status !== 'published');
+      if (selected && !preferredId && !issue.id) {
+        setIssue(selected);
+        setEntries(selected.entries || []);
+      }
+    } catch (error) { setNotice({ type: 'error', text: error.message }); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { refresh(); }, []);
+
+  const publishedOpportunities = useMemo(() => (opportunities || []).filter((opportunity) => opportunity.status === 'Publicada'), [opportunities]);
+  const selectedIds = useMemo(() => new Set(entries.map((entry) => String(entry.opportunity_id))), [entries]);
+  const available = useMemo(() => {
+    const query = search.trim().toLocaleLowerCase('pt-BR');
+    return publishedOpportunities
+      .filter((opportunity) => !selectedIds.has(String(opportunity._raw?.id || opportunity.id)))
+      .filter((opportunity) => !query || `${opportunity.titulo} ${opportunity.descricao} ${opportunity.tipo}`.toLocaleLowerCase('pt-BR').includes(query))
+      .slice(0, 60);
+  }, [publishedOpportunities, search, selectedIds]);
+
+  const html = useMemo(() => buildNewsletterHtml(issue, entries), [issue, entries]);
+  const patchIssue = (key, value) => setIssue((current) => ({
+    ...current,
+    [key]: value,
+    ...(key === 'title' && (!current.campaign_slug || current.campaign_slug === slugify(current.title)) ? { campaign_slug: slugify(value) } : {}),
+  }));
+
+  const selectIssue = (id) => {
+    const selected = issues.find((item) => String(item.id) === String(id));
+    if (!selected) return;
+    setIssue({ ...selected });
+    setEntries((selected.entries || []).map((entry) => ({ ...entry })));
+    setNotice(null);
+    setTab('editor');
+  };
+  const startNew = () => { setIssue(blankIssue()); setEntries([]); setNotice(null); setTab('editor'); };
+  const addOpportunity = (opportunity) => setEntries((current) => current.concat(opportunityToNewsletterEntry(opportunity, current.length)));
+  const updateEntry = (index, value) => setEntries((current) => current.map((entry, entryIndex) => entryIndex === index ? value : entry));
+  const removeEntry = (index) => setEntries((current) => current.filter((_, entryIndex) => entryIndex !== index));
+  const moveEntry = (index, direction) => setEntries((current) => {
+    const target = index + direction;
+    if (target < 0 || target >= current.length) return current;
+    const next = [...current];
+    [next[index], next[target]] = [next[target], next[index]];
+    return next;
+  });
+
+  const save = async (status = issue.status) => {
+    if (!issue.title.trim()) return setNotice({ type: 'error', text: 'Dê um nome à edição antes de salvar.' });
+    setSaving(true); setNotice(null);
+    try {
+      const saved = await saveNewsletterIssue({ ...issue, status }, entries);
+      setIssue(saved); setEntries(saved.entries);
+      setNotice({ type: 'success', text: status === 'ready' ? 'Edição marcada como pronta.' : 'Rascunho salvo no Supabase.' });
+      await refresh(saved.id);
+    } catch (error) { setNotice({ type: 'error', text: error.message }); }
+    finally { setSaving(false); }
   };
 
-  const [tab, setTab] = useState('compor');
-  const [accounts, setAccounts] = useState(() => D.instaAccounts.map((a) => a.incluido));
-  const initialSel = D.instaPosts
-    .filter((p) => { const acc = D.instaAccounts.find((a) => a.handle === p.conta); return acc && acc.incluido; })
-    .slice(0, 3).map((p) => p.id);
-  const [sel, setSel] = useState(initialSel);
-  const [titulo, setTitulo] = useState('Oportunidades da semana · 16 jun');
+  const copyHtml = async () => {
+    try {
+      await navigator.clipboard.writeText(html);
+      setNotice({ type: 'success', text: 'HTML copiado. Cole em um bloco HTML do Beehiiv.' });
+    } catch { setNotice({ type: 'error', text: 'O navegador bloqueou a área de transferência. Selecione o HTML abaixo e copie manualmente.' }); }
+  };
 
-  const includedHandles = D.instaAccounts.filter((a, i) => accounts[i]).map((a) => a.handle);
-  const visiblePosts = D.instaPosts.filter((p) => includedHandles.includes(p.conta));
-  const toggleAcc = (i) => setAccounts((s) => s.map((v, j) => (j === i ? !v : v)));
-  const togglePost = (id) => setSel((s) => s.includes(id) ? s.filter((x) => x !== id) : s.concat(id));
-  const selectedPosts = D.instaPosts.filter((p) => sel.includes(p.id));
-  const generate = () => setSel(visiblePosts.map((p) => p.id));
+  const markPublished = async () => {
+    setSaving(true);
+    try {
+      const current = issue.id ? issue : await saveNewsletterIssue({ ...issue, status: 'ready' }, entries);
+      const saved = await markNewsletterPublished(current, entries);
+      setIssue(saved); setEntries(saved.entries);
+      setNotice({ type: 'success', text: 'Edição marcada como enviada. O histórico das oportunidades foi atualizado.' });
+      await refresh(saved.id);
+    } catch (error) { setNotice({ type: 'error', text: error.message }); }
+    finally { setSaving(false); }
+  };
 
-  const tabs = [
-    { value: 'compor', label: 'Compor' },
-    { value: 'aprovadas', label: 'Aprovadas (Sentinel)' },
-    { value: 'anteriores', label: 'Edições anteriores' },
-  ];
+  const removeIssue = async (item) => {
+    if (!window.confirm(`Excluir a edição “${item.title}”?`)) return;
+    try {
+      await deleteNewsletterIssue(item.id);
+      setIssues((current) => current.filter((candidate) => candidate.id !== item.id));
+      if (issue.id === item.id) startNew();
+    } catch (error) { setNotice({ type: 'error', text: error.message }); }
+  };
 
-  if (tab === 'aprovadas') {
-    const cols = [
-      { key: 'instaAccount', header: 'Conta' },
-      { key: 'title',        header: 'Título' },
-      { key: 'deadline',     header: 'Prazo' },
-      { key: 'link',         header: 'Link' },
-    ];
+  const tabs = [{ value: 'editor', label: 'Montar edição' }, { value: 'history', label: `Edições (${issues.length})` }];
+
+  if (loading) return <div className="workflow-empty">Carregando a mesa editorial…</div>;
+  if (tab === 'history') {
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-        <Tabs items={tabs} value={tab} onChange={setTab} />
+      <div className="newsletter-page">
+        <div className="newsletter-toolbar"><Tabs items={tabs} value={tab} onChange={setTab} /><Button variant="primary" iconLeft={Ic('plus', 'ico-xs')} onClick={startNew} disabled={!perms.canWrite}>Nova edição</Button></div>
+        {notice && <div className={`workflow-notice workflow-notice--${notice.type}`}>{notice.text}</div>}
         <Card flat>
-          <CardHeader style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-            <CardTitle style={{ fontSize: 15 }}>
-              Oportunidades aprovadas na planilha ({approvedFiltradas.length})
-            </CardTitle>
-            <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-              <Select value={contaFiltro} onChange={(e) => setContaFiltro(e.target.value)} style={{ minWidth: 200 }}>
-                <option value="todas">Todas as contas</option>
-                {contasAprovadas.map((c) => <option key={c} value={c}>@{c}</option>)}
-              </Select>
-              <Button
-                variant="primary" size="sm"
-                iconLeft={Ic(copyStatus === 'copied' ? 'check' : 'copy', 'ico-xs')}
-                onClick={copiarHtml}
-                disabled={approvedFiltradas.length === 0}
-              >
-                {copyStatus === 'copied' ? 'Copiado!' : copyStatus === 'error' ? 'Erro ao copiar' : 'Copiar HTML da edição'}
-              </Button>
-            </div>
-          </CardHeader>
-          <CardBody style={{ paddingTop: 0 }}>
-            {approvedLoading ? (
-              <div style={{ padding: 20, textAlign: 'center', color: 'var(--muted-foreground)', fontSize: 13 }}>
-                Carregando planilha…
-              </div>
-            ) : approvedFiltradas.length === 0 ? (
-              <div style={{ padding: 20, textAlign: 'center', color: 'var(--muted-foreground)', fontSize: 13, border: '1px dashed var(--border)', borderRadius: 'var(--radius-md)' }}>
-                Nenhuma oportunidade aprovada ainda. Revise a planilha do Sentinel e marque linhas como "approved".
-              </div>
-            ) : (
-              <div className="ap-table-wrap">
-                <Table columns={cols} data={approvedFiltradas} rowKey="link" renderCell={(r, c) => {
-                  if (c.key === 'instaAccount') return r.instaAccount ? <span>@{r.instaAccount}</span> : '—';
-                  if (c.key === 'title')        return <span style={{ fontWeight: 600 }}>{r.title}</span>;
-                  if (c.key === 'link')         return r.link ? <a href={r.link} target="_blank" rel="noreferrer" style={{ color: 'var(--azul)' }}>Abrir ↗</a> : '—';
-                  return r[c.key] || '—';
-                }} />
-              </div>
-            )}
+          <CardHeader><CardTitle style={{ fontSize: 16 }}>Arquivo editorial</CardTitle></CardHeader>
+          <CardBody className="issue-history">
+            {issues.length === 0 ? <div className="workflow-empty">Nenhuma edição salva. Comece a primeira Weekly Drop.</div> : issues.map((item) => {
+              const status = ISSUE_STATUS[item.status] || ISSUE_STATUS.draft;
+              return (
+                <article className="issue-history-row" key={item.id}>
+                  <button type="button" className="issue-history-main" onClick={() => selectIssue(item.id)}>
+                    <span className="issue-history-date">{formatDate(item.published_at || item.created_at)}</span>
+                    <span><strong>{item.title}</strong><small>{item.entries?.length || 0} oportunidades · atualizado {formatDate(item.updated_at, true)}</small></span>
+                    <Badge variant={status.variant} dot>{status.label}</Badge>
+                  </button>
+                  {perms.canWrite && <button type="button" className="row-action" onClick={() => removeIssue(item)} aria-label="Excluir edição">{Ic('trash-2', 'ico-sm')}</button>}
+                </article>
+              );
+            })}
           </CardBody>
         </Card>
       </div>
     );
   }
 
-  if (tab === 'anteriores') {
-    const cols = [
-      { key: 'titulo',       header: 'Edição' },
-      { key: 'status',       header: 'Status' },
-      { key: 'data',         header: 'Data' },
-      { key: 'destinatarios',header: 'Destinatários', align: 'right' },
-      { key: 'aberturas',    header: 'Aberturas',     align: 'right' },
-      { key: 'itens',        header: 'Itens',         align: 'right' },
-    ];
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-        <Tabs items={tabs} value={tab} onChange={setTab} />
-        <Card flat>
-          <div className="ap-table-wrap">
-            <Table columns={cols} data={D.newsletters} renderCell={(r, c) => {
-              if (c.key === 'titulo')   return <span style={{ fontWeight: 600 }}>{r.titulo}</span>;
-              if (c.key === 'status')   return <Badge variant={D.newsletterStatusVariant[r.status]} dot>{r.status}</Badge>;
-              if (c.key === 'aberturas') return <span style={{ fontWeight: 600, color: r.aberturas !== '—' ? 'var(--success)' : 'var(--muted-foreground)' }}>{r.aberturas}</span>;
-              return r[c.key];
-            }} />
-          </div>
-        </Card>
-      </div>
-    );
-  }
-
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-      <Tabs items={tabs} value={tab} onChange={setTab} />
-      <div className="ap-newsletter-grid" style={{ display: 'grid', gridTemplateColumns: '1.15fr 1fr', gap: 22, alignItems: 'start' }}>
-        {/* Compose */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 18, minWidth: 0 }}>
+    <div className="newsletter-page">
+      <div className="newsletter-toolbar">
+        <Tabs items={tabs} value={tab} onChange={setTab} />
+        <div className="newsletter-toolbar-actions">
+          {issues.length > 0 && <Select value={issue.id || ''} onChange={(event) => event.target.value ? selectIssue(event.target.value) : startNew()} style={{ minWidth: 210 }}><option value="">Nova edição</option>{issues.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</Select>}
+          <Button variant="outline" iconLeft={Ic('save', 'ico-xs')} onClick={() => save('draft')} disabled={!perms.canWrite || saving}>{saving ? 'Salvando…' : 'Salvar rascunho'}</Button>
+          <Button variant="primary" iconLeft={Ic('copy', 'ico-xs')} onClick={copyHtml} disabled={entries.length === 0}>Copiar HTML</Button>
+        </div>
+      </div>
+      {notice && <div className={`workflow-notice workflow-notice--${notice.type}`}>{notice.text}</div>}
+
+      <section className="newsletter-masthead">
+        <span>EDIÇÃO EM MONTAGEM</span>
+        <input value={issue.title} onChange={(event) => patchIssue('title', event.target.value)} aria-label="Nome da edição" />
+        <div><Badge variant={(ISSUE_STATUS[issue.status] || ISSUE_STATUS.draft).variant} dot>{(ISSUE_STATUS[issue.status] || ISSUE_STATUS.draft).label}</Badge><small>{entries.length} oportunidades selecionadas</small></div>
+      </section>
+
+      <div className="newsletter-workspace">
+        <div className="newsletter-compose">
           <Card>
-            <CardHeader style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: 8 }}>
-              <CardTitle style={{ fontSize: 15, display: 'flex', gap: 8, alignItems: 'center' }}>
-                {Ic('instagram', 'ico-sm')} Contas do Instagram
-              </CardTitle>
-              <Button variant="ghost" size="sm" iconLeft={Ic('plus', 'ico-xs')}>Conectar</Button>
-            </CardHeader>
-            <CardBody style={{ paddingTop: 8 }}>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                {D.instaAccounts.map((a, i) => (
-                  <Account key={a.id} a={a} on={accounts[i]} onToggle={() => toggleAcc(i)} />
-                ))}
+            <CardHeader><CardTitle style={{ fontSize: 16 }}>Envelope da edição</CardTitle><p className="card-helper">Assunto e preheader ficam guardados para você copiar ao criar o post no Beehiiv.</p></CardHeader>
+            <CardBody className="newsletter-metadata">
+              <Field label="Assunto"><Input value={issue.subject} placeholder={issue.title} onChange={(event) => patchIssue('subject', event.target.value)} /></Field>
+              <Field label="Preheader"><Input value={issue.preheader} placeholder="Uma prévia curta para a caixa de entrada" onChange={(event) => patchIssue('preheader', event.target.value)} /></Field>
+              <Field label="Abertura"><Textarea rows={3} value={issue.intro} onChange={(event) => patchIssue('intro', event.target.value)} /></Field>
+              <div className="newsletter-two-fields">
+                <Field label="Campanha UTM" hint="Adicionada aos links automaticamente."><Input value={issue.campaign_slug} onChange={(event) => patchIssue('campaign_slug', event.target.value)} /></Field>
+                <Field label="URL no Beehiiv" hint="Opcional, depois que o post existir."><Input type="url" value={issue.beehiiv_url || ''} onChange={(event) => patchIssue('beehiiv_url', event.target.value)} /></Field>
               </div>
             </CardBody>
           </Card>
 
+          <Card className="publication-card">
+            <CardHeader><div className="publication-card-heading"><div><CardTitle style={{ fontSize: 16 }}>Ordem de publicação</CardTitle><p className="card-helper">Abra um item para ajustar o texto desta edição sem alterar o catálogo.</p></div><span className="publication-rule" /></div></CardHeader>
+            <CardBody className="publication-strip">
+              {entries.length === 0 ? <div className="workflow-empty">Escolha oportunidades no catálogo ao lado para começar.</div> : entries.map((entry, index) => <EntryEditor key={`${entry.opportunity_id || 'snapshot'}-${index}`} entry={entry} index={index} total={entries.length} onChange={updateEntry} onMove={moveEntry} onRemove={removeEntry} />)}
+            </CardBody>
+          </Card>
+
           <Card>
-            <CardHeader style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: 8 }}>
-              <CardTitle style={{ fontSize: 15 }}>Posts recentes</CardTitle>
-              <Button variant="outline" size="sm" iconLeft={Ic('sparkles', 'ico-xs')} onClick={generate}>Gerar com tudo</Button>
-            </CardHeader>
-            <CardBody style={{ display: 'flex', flexDirection: 'column', gap: 10, paddingTop: 8 }}>
-              {visiblePosts.map((p) => {
-                const on = sel.includes(p.id);
-                const acc = D.instaAccounts.find((a) => a.handle === p.conta);
-                return (
-                  <div key={p.id} onClick={() => togglePost(p.id)}
-                    style={{ display: 'flex', gap: 12, padding: 12, borderRadius: 'var(--radius-md)', cursor: 'pointer', border: '1px solid ' + (on ? 'var(--azul)' : 'var(--border)'), background: on ? 'var(--azul-soft)' : 'var(--card)' }}>
-                    <span style={{ width: 34, height: 34, flex: 'none', borderRadius: '50%', background: acc ? acc.cor : 'var(--azul)', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontFamily: 'var(--font-display)', fontSize: 13 }}>
-                      {p.conta.charAt(1).toUpperCase()}
-                    </span>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 2 }}>
-                        <span style={{ fontSize: 12.5, fontWeight: 600 }}>{p.conta}</span>
-                        <Badge variant="neutral">{p.tipo}</Badge>
-                        <span style={{ fontSize: 11.5, color: 'var(--muted-foreground)' }}>· {p.quando}</span>
-                      </div>
-                      <div style={{ fontSize: 13, color: 'var(--neutral-700)', lineHeight: 1.4 }}>{p.resumo}</div>
-                      <div style={{ fontSize: 11.5, color: 'var(--muted-foreground)', marginTop: 4, display: 'flex', alignItems: 'center', gap: 5 }}>
-                        {Ic('heart', 'ico-xs')} {p.curtidas} · {p.oportunidade}
-                      </div>
-                    </div>
-                    <span style={{ color: on ? 'var(--azul)' : 'var(--neutral-300)', flex: 'none' }}>
-                      {Ic(on ? 'check-circle-2' : 'circle', 'ico-sm')}
-                    </span>
-                  </div>
-                );
-              })}
+            <CardHeader><CardTitle style={{ fontSize: 16 }}>Saída para Beehiiv</CardTitle><p className="card-helper">O preview usa o mesmo HTML inline que será copiado.</p></CardHeader>
+            <CardBody>
+              <iframe title="Preview da newsletter" className="newsletter-preview" sandbox="" srcDoc={`<!doctype html><html><body style="margin:0;background:#fff;">${html}</body></html>`} />
+              <details className="newsletter-code"><summary>Ver HTML gerado</summary><Textarea readOnly value={html} rows={12} /></details>
             </CardBody>
           </Card>
         </div>
 
-        {/* Preview */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14, position: 'sticky', top: 84 }}>
-          <Card style={{ overflow: 'hidden' }}>
-            <div style={{ background: 'var(--ink)', padding: '18px 20px', display: 'flex', alignItems: 'center', gap: 10 }}>
-              <img src="/assets/icon-branco.png" alt="" style={{ width: 28, height: 28, borderRadius: '50%' }} />
-              <span style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 16, color: '#fff' }}>
-                Access<span style={{ color: 'var(--grifa-texto)' }}>+</span>Plus
-              </span>
-              <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--sidebar-muted)', textTransform: 'uppercase', letterSpacing: '.1em' }}>Newsletter</span>
-            </div>
-            <CardBody style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-              <input
-                value={titulo}
-                onChange={(e) => setTitulo(e.target.value)}
-                className="ap-input"
-                style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 18, border: '1px dashed var(--border)' }}
-              />
-              <p style={{ fontSize: 13.5, color: 'var(--neutral-700)', margin: 0, lineHeight: 1.5 }}>
-                Oi! Separamos as melhores oportunidades da semana pra você que busca as próprias oportunidades. 👇
-              </p>
-              {selectedPosts.length === 0 && (
-                <div style={{ padding: 20, textAlign: 'center', color: 'var(--muted-foreground)', fontSize: 13, border: '1px dashed var(--border)', borderRadius: 'var(--radius-md)' }}>
-                  Selecione posts ao lado para montar a edição.
-                </div>
-              )}
-              {selectedPosts.map((p, i) => (
-                <div key={p.id} style={{ display: 'flex', gap: 12, paddingBottom: 14, borderBottom: i < selectedPosts.length - 1 ? '1px solid var(--neutral-100)' : 'none' }}>
-                  <span style={{ width: 30, height: 30, flex: 'none', borderRadius: 8, background: 'var(--azul-soft)', color: 'var(--azul)', fontWeight: 800, fontFamily: 'var(--font-display)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 13 }}>{i + 1}</span>
-                  <div>
-                    <div style={{ fontSize: 14, fontWeight: 700, fontFamily: 'var(--font-display)' }}>{p.oportunidade}</div>
-                    <div style={{ fontSize: 12.5, color: 'var(--neutral-700)', marginTop: 2, lineHeight: 1.4 }}>{p.resumo}</div>
-                    <span style={{ fontSize: 12, color: 'var(--azul)', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 4 }}>
-                      Ver oportunidade {Ic('arrow-right', 'ico-xs')}
-                    </span>
-                  </div>
-                </div>
-              ))}
-              <div style={{ fontSize: 11, color: 'var(--muted-foreground)', textAlign: 'center', paddingTop: 4 }}>
-                Access+Plus · você recebe porque se inscreveu · descadastrar
+        <aside className="opportunity-palette">
+          <Card>
+            <CardHeader><CardTitle style={{ fontSize: 16 }}>Catálogo aprovado</CardTitle><p className="card-helper">Só oportunidades publicadas aparecem aqui. Adicionar não muda sua exibição no site.</p></CardHeader>
+            <CardBody>
+              <Input icon={Ic('search', 'ico-sm')} value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar oportunidade" />
+              <div className="opportunity-palette-list">
+                {available.length === 0 ? <div className="workflow-empty">Nenhuma oportunidade disponível para este filtro.</div> : available.map((opportunity) => {
+                  const id = opportunity._raw?.id || opportunity.id;
+                  const last = featured[id];
+                  return (
+                    <article key={id} className="opportunity-palette-row">
+                      <div><strong>{opportunity.titulo}</strong><span>{opportunity.prazo || 'Prazo não informado'} · {opportunity.custo || 'Custo não informado'}</span>{last && <small>Última newsletter: {formatDate(last.date)}</small>}</div>
+                      <Button variant="ghost" size="icon" onClick={() => addOpportunity(opportunity)} disabled={!perms.canWrite} aria-label={`Adicionar ${opportunity.titulo}`}>{Ic('plus', 'ico-sm')}</Button>
+                    </article>
+                  );
+                })}
               </div>
             </CardBody>
           </Card>
-
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-            <span style={{ fontSize: 12.5, color: 'var(--muted-foreground)', flex: 1 }}>{selectedPosts.length} itens · ~9.412 destinatários</span>
-            <Button variant="outline" size="sm" iconLeft={Ic('save', 'ico-xs')}>Rascunho</Button>
-            <Button variant="outline" size="sm" iconLeft={Ic('calendar-clock', 'ico-xs')}>Agendar</Button>
-            <Button variant="primary"  size="sm" iconLeft={Ic('send', 'ico-xs')}>Publicar</Button>
-          </div>
-        </div>
+          <Card className="newsletter-finish-card">
+            <CardBody>
+              <span>FECHAMENTO</span>
+              <h3>Pronta para sair?</h3>
+              <p>Copie o HTML, crie o post no Beehiiv e marque como enviada para registrar o histórico.</p>
+              <Button variant="outline" onClick={() => save('ready')} disabled={!perms.canWrite || saving || entries.length === 0}>Marcar como pronta</Button>
+              <Button variant="primary" iconLeft={Ic('check-circle-2', 'ico-xs')} onClick={markPublished} disabled={!perms.canWrite || saving || entries.length === 0 || issue.status === 'published'}>{issue.status === 'published' ? 'Envio registrado' : 'Marcar como enviada'}</Button>
+            </CardBody>
+          </Card>
+        </aside>
       </div>
     </div>
   );

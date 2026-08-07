@@ -15,13 +15,15 @@ import OpportunityDetail from './screens/OpportunityDetail';
 import OpportunityEditor from './screens/OpportunityEditor';
 import Revisao from './screens/Revisao';
 import Newsletter from './screens/Newsletter';
+import Sentinel from './screens/Sentinel';
 import Team from './screens/Team';
 
 const TITLES = {
   dashboard:     'Visão geral',
   oportunidades: 'Oportunidades',
   revisao:       'Em revisão',
-  //newsletter:    'Newsletter',
+  sentinel:      'Sentinel',
+  newsletter:    'Newsletter',
   time:          'Membros do time',
   //config:        'Configurações',
 };
@@ -29,10 +31,11 @@ const SUBS = {
   dashboard:     'Acompanhe e gerencie as oportunidades em um só lugar.',
   oportunidades: 'Crie, filtre, edite e publique as oportunidades visíveis para os estudantes.',
   revisao:       'Oportunidades aguardando aprovação antes de irem pro ar.',
-  //newsletter:    'Monte e publique a newsletter a partir das contas de Instagram conectadas.',
+  sentinel:      'Encontre, filtre e pesquise oportunidades antes da revisão editorial.',
+  newsletter:    'Monte edições com o catálogo e mantenha o histórico de cada oportunidade.',
   time:          'Gerencie quem tem acesso ao painel e suas permissões.',
 };
-const VALID_SCREENS = ['dashboard', 'oportunidades', 'revisao', 'time'];
+const VALID_SCREENS = ['dashboard', 'oportunidades', 'revisao', 'sentinel', 'newsletter', 'time'];
 
 export default function App() {
   // --- Autenticação ---
@@ -211,8 +214,10 @@ export default function App() {
           perms={perms}
         />
       );
-  //} else if (active === 'newsletter') {
-   // screen = <Newsletter />;
+  } else if (active === 'sentinel') {
+    screen = <Sentinel perms={perms} />;
+  } else if (active === 'newsletter') {
+    screen = <Newsletter opportunities={D.opportunities} perms={perms} />;
   } else if (active === 'time') {
     screen = <Team perms={perms} />;
   } else {

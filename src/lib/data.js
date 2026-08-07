@@ -7,12 +7,12 @@
 // O resto abaixo (nav, filters, variants) é configuração da interface, não
 // conteúdo de exemplo — continua fixo.
 const D = {
-  // Newsletter e Configurações ficam de fora do menu por enquanto — não fazem
-  // parte desta versão (o código continua no projeto, só não aparece no nav).
   nav: [
     { id: 'dashboard',     label: 'Visão geral',    icon: 'LayoutDashboard' },
     { id: 'oportunidades', label: 'Oportunidades',   icon: 'Compass' },
     { id: 'revisao',       label: 'Em revisão',      icon: 'FilePen' },
+    { id: 'sentinel',      label: 'Sentinel',        icon: 'Radar' },
+    { id: 'newsletter',    label: 'Newsletter',      icon: 'Newspaper' },
     { id: 'time',          label: 'Membros do time', icon: 'UsersRound' },
   ],
 
