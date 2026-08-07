@@ -15,6 +15,7 @@ const MODEL_TIMEOUT_MS = Math.max(10_000, Math.min(Number(process.env.SENTINEL_M
 const MAX_ADJACENT_PAGES = Math.max(0, Math.min(Number(process.env.SENTINEL_ADJACENT_PAGES) || 2, 4));
 const SOURCE_CHAR_LIMIT = Math.max(12_000, Math.min(Number(process.env.SENTINEL_SOURCE_CHAR_LIMIT) || 24_000, 40_000));
 const CATALOG_PROMPT_VERSION = 'catalog-review-v5';
+const DISCOVERY_PROMPT_VERSION = 'discovery-v2';
 const SCORE_THRESHOLD = 4;
 const SOURCE_ACCOUNTS = ['opportunitydesk', 'opportunities_corners', 'opportunitiesforyouth', 'adroiteducation', 'borderless.so'];
 const HS_SIGNALS = ['high school', 'secondary school', 'high schooler', 'grade 9', 'grade 10', 'grade 11', 'grade 12'];
@@ -76,7 +77,7 @@ async function createRun(supabase, user, runType, requestedCount, metadata = {})
     run_type: runType,
     requested_count: requestedCount,
     model: MODEL,
-    prompt_version: runType === 'catalog_review' ? CATALOG_PROMPT_VERSION : 'discovery-v1',
+    prompt_version: runType === 'catalog_review' ? CATALOG_PROMPT_VERSION : DISCOVERY_PROMPT_VERSION,
     metadata,
     created_by: user.id,
   }).select().single();
@@ -118,6 +119,56 @@ function scorePost(post) {
 
 function extractUrl(value) {
   return String(value || '').match(/https?:\/\/[^\s\)"]+/)?.[0] || null;
+}
+
+const TRACKING_PARAMS = /^(?:utm_.+|fbclid|gclid|mc_cid|mc_eid|ref|referrer|source)$/i;
+const DISCOVERY_TITLE_NOISE = new Set([
+  'apply', 'application', 'applications', 'conference', 'funded', 'fully', 'now',
+  'open', 'opportunity', 'program', 'programme', 'scholarship',
+]);
+
+export function canonicalizeOpportunityUrl(value) {
+  try {
+    const url = new URL(String(value || '').trim());
+    url.hash = '';
+    url.hostname = comparableHost(url.hostname);
+    for (const key of [...url.searchParams.keys()]) {
+      if (TRACKING_PARAMS.test(key)) url.searchParams.delete(key);
+    }
+    url.searchParams.sort();
+    url.pathname = url.pathname.replace(/\/+$/, '') || '/';
+    return url.toString().replace(/\/$/, '');
+  } catch {
+    return String(value || '').trim().toLowerCase().replace(/\/+$/, '');
+  }
+}
+
+export function discoveryTitleTokens(value) {
+  return String(value || '')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().split(/\s+/)
+    .filter((token) => token && !DISCOVERY_TITLE_NOISE.has(token));
+}
+
+export function opportunityDiscoveryKey(link, title) {
+  return `${canonicalizeOpportunityUrl(link)}|${discoveryTitleTokens(title).join(' ')}`;
+}
+
+export function discoveryTitleSimilarity(left, right) {
+  const a = new Set(discoveryTitleTokens(left));
+  const b = new Set(discoveryTitleTokens(right));
+  if (!a.size || !b.size) return 0;
+  const intersection = [...a].filter((token) => b.has(token)).length;
+  return intersection / Math.min(a.size, b.size);
+}
+
+export function isDuplicateOpportunity(candidate, extracted) {
+  const sameKey = candidate?.sentinel_discovery_key
+    && candidate.sentinel_discovery_key === opportunityDiscoveryKey(extracted.link, extracted.title);
+  if (sameKey) return true;
+  const similarity = discoveryTitleSimilarity(candidate?.title, extracted.title);
+  const sameUrl = canonicalizeOpportunityUrl(candidate?.link) === canonicalizeOpportunityUrl(extracted.link);
+  return (sameUrl && similarity >= 0.72) || (similarity === 1 && discoveryTitleTokens(extracted.title).length >= 4);
 }
 
 function decodeHtmlEntities(value) {
@@ -310,65 +361,173 @@ function parseJsonObject(raw) {
 function discoveryPrompt(manual = false) {
   const today = new Date().toISOString().slice(0, 10);
   const cutoff = new Date(Date.now() + 30 * 86400_000).toISOString().slice(0, 10);
-  const criteria = manual ? '' : `\nInclua apenas programas gratuitos ou com apoio financeiro substancial, abertos a brasileiros, adequados a estudantes de 14–18 anos e com prazo até ${cutoff}, contínuo ou desconhecido. Exclua oportunidades universitárias e prazos anteriores a ${today}.`;
-  return `Você pesquisa oportunidades educacionais para estudantes brasileiros do ensino médio. Baseie a resposta SOMENTE no conteúdo fornecido. Não invente fatos.${criteria}\nTodos os campos devem estar em português brasileiro. Responda SOMENTE com um objeto JSON cru, sem markdown:\n{"name":"Nome","summary":"Descrição de 1–2 frases que menciona o principal benefício","eligibility":["critério"],"deadline":"DD de mês de YYYY","fees":"taxas e apoio financeiro","link":"URL oficial"}\nSe a oportunidade não se qualificar ou não houver dados suficientes, responda: {"qualified":false}`;
+  const criteria = manual ? '' : `\nInclua apenas oportunidades gratuitas ou com apoio financeiro substancial, abertas a brasileiros, adequadas a estudantes de 14–18 anos e com prazo até ${cutoff}, contínuo ou desconhecido. Exclua oportunidades exclusivamente universitárias e prazos anteriores a ${today}.`;
+  return `Você pesquisa novas oportunidades educacionais para estudantes brasileiros do ensino médio. Hoje é ${today}. Baseie tudo SOMENTE nas fontes fornecidas e não complete lacunas por conhecimento prévio.${criteria}
+
+PRAZOS:
+1. deadline é somente a data limite para enviar candidatura, inscrição, projeto ou indicação.
+2. Data do evento, cerimônia, resultado, viagem, início, pagamento ou final não comprova deadline.
+3. Só informe deadline com uma citação que diga explicitamente deadline, applications close/due, registration closes/ends, submit by, register by, inscrições até, prazo ou equivalente.
+4. Não infira datas pelo calendário e não misture edições.
+5. Formate sem zero à esquerda: "4 de setembro de 2026". Se não houver prazo comprovado, use null.
+
+IDIOMA E TAXONOMIA:
+- Todos os valores, exceto nomes próprios, citações e URLs, devem estar em português brasileiro.
+- cost deve separar taxa de candidatura de taxas cobradas apenas de finalistas ou participantes.
+- location deve separar candidatura remota de evento ou final presencial.
+- areas: STEM, Humanas, Meio Ambiente, Linguagens ou Artes.
+- level: Ensino Médio, Fundamental ou Gap Year.
+- audience: Meninas, Escola Pública, Indígenas, Deficientes, Negros, LGBT ou Baixa Renda.
+- type: Programas Acadêmicos, Olimpíadas Científicas, Competições, Competições de Escrita, Mentorias, Bolsas de Estudo, Programas de Intercâmbio, MUNs ou Estágios.
+
+Cada campo preenchido deve ter evidence com citação literal e a URL exata da página onde o trecho foi encontrado. Se veio de inscrições, regulamento ou outra página adjacente, use essa URL, não a página principal.
+
+Responda SOMENTE com JSON cru:
+{"qualified":true,"title":"Nome oficial","description":"Resumo em português","link":"URL oficial","deadline":"4 de setembro de 2026","areas":["STEM"],"level":["Ensino Médio"],"location":"Candidatura remota; evento presencial em...","audience":[],"cost":"Gratuito","language":"Inglês","keywords":["tema"],"eligibility":"Critérios em português","process":"Processo em português","applicants":"Orientações em português","additionals":"Informações adicionais","type":"Programas Acadêmicos","evidence":{"deadline":{"quote":"Applications close on September 4, 2026","source_url":"https://example.org/apply","kind":"application_deadline"}}}
+Se não se qualificar ou não houver dados suficientes: {"qualified":false,"reason":"motivo curto em português"}.`;
+}
+
+function normalizeDiscoveryResult(parsed, research, fallbackUrl) {
+  if (parsed.qualified === false) return { result: null, rejectionReason: String(parsed.reason || 'Não atende aos critérios da busca.') };
+  const aliases = { title: parsed.title || parsed.name, description: parsed.description || parsed.summary, cost: parsed.cost || parsed.fees };
+  const result = {};
+  const evidence = {};
+  const validationNotes = [];
+  for (const field of REVIEW_FIELDS.filter((item) => item !== 'status')) {
+    const raw = Object.prototype.hasOwnProperty.call(aliases, field) ? aliases[field] : parsed[field];
+    if (raw == null || raw === '') continue;
+    const normalized = normalizeUpdate(field, raw);
+    if (normalized === undefined || !isPortugueseCatalogValue(field, normalized)) {
+      validationNotes.push(`${field} descartado: valor inválido ou fora da taxonomia em português`);
+      continue;
+    }
+    if (field === 'deadline') {
+      const checked = validateFieldEvidence(field, normalized, parsed.evidence?.[field], research.sources);
+      if (!checked.valid) {
+        validationNotes.push(`deadline descartado: ${checked.reason}`);
+        continue;
+      }
+      evidence[field] = checked.evidence;
+    } else if (parsed.evidence?.[field]) {
+      const checked = validateFieldEvidence(field, normalized, parsed.evidence[field], research.sources);
+      if (checked.valid) evidence[field] = checked.evidence;
+      else validationNotes.push(`${field}: evidência descartada (${checked.reason})`);
+    }
+    result[field] = normalized;
+  }
+  result.title = result.title || String(parsed.title || parsed.name || '').trim();
+  const proposedLink = canonicalizeOpportunityUrl(result.link || parsed.link || fallbackUrl);
+  const hostOf = (value) => { try { return comparableHost(new URL(value).hostname); } catch { return ''; } };
+  const relatedLink = hostOf(proposedLink) && research.sources.some((source) => hostOf(source.url) === hostOf(proposedLink));
+  result.link = relatedLink ? proposedLink : canonicalizeOpportunityUrl(research.sources[0]?.url || fallbackUrl);
+  if (!result.title || !result.link) return { result: null, rejectionReason: 'A fonte não confirmou nome e link oficial suficientes.' };
+  if (result.deadline && isPastDate(result.deadline)) return { result: null, rejectionReason: `O prazo confirmado (${result.deadline}) já passou.` };
+  result.description = result.description || 'Descrição ainda não confirmada. Revise antes de publicar.';
+  result.level = result.level?.length ? result.level : ['Ensino Médio'];
+  result.areas = result.areas || [];
+  result.audience = result.audience || [];
+  result.keywords = [...new Set([...(result.keywords || []), 'Sentinel'])];
+  result.type = result.type || 'Programas Acadêmicos';
+  return { result, evidence, validationNotes };
 }
 
 async function groundUrl(url, caption = '', ownerUsername = '', manual = false) {
-  const page = await fetchPageText(url);
+  const research = await fetchResearchSources(url);
+  let metrics = { ...emptyMetrics(), pageFetches: research.pageFetches };
   try {
-    const prompt = discoveryPrompt(manual)
-      .replace('"DD de mês de YYYY"', '"D de mês de YYYY", sem zero à esquerda')
-      .concat('\nEscreva "4 de setembro de 2026", nunca "04 de setembro de 2026".');
-    const response = await callModel(prompt, `Legenda: ${caption}\nConta: @${ownerUsername}\nURL: ${url}\n\nConteúdo:\n${page.text}\n\nRetorne o JSON agora.`);
-    const result = parseJsonObject(response.content);
-    if (result.deadline) result.deadline = normalizeDeadlineOutput(result.deadline);
+    const response = await callModel(discoveryPrompt(manual), `Legenda: ${caption}\nConta: @${ownerUsername}\nURL inicial: ${url}\n\n${sourcesForPrompt(research.sources)}\n\nRetorne o JSON agora.`);
+    metrics = addMetrics(metrics, response.metrics);
+    const normalized = normalizeDiscoveryResult(parseJsonObject(response.content), research, url);
     return {
-      result: result.qualified === false || !result.name || !result.link ? null : result,
-      metrics: addMetrics(response.metrics, { pageFetches: page.pageFetches }),
+      ...normalized,
+      metrics,
+      trace: {
+        selected_model: response.model,
+        model_attempts: response.attempts,
+        sources: research.sources.map((source) => ({ url: source.url, relation: source.relation })),
+        adjacent_failures: research.adjacentFailures,
+      },
     };
   } catch (error) {
-    error.metrics = addMetrics(error.metrics, { pageFetches: page.pageFetches });
+    error.metrics = addMetrics(error.metrics, metrics);
     throw error;
   }
 }
 
 async function findOrCreateOpportunity(supabase, extracted) {
-  const { data: existing } = await supabase.from('opportunities').select('*').eq('link', extracted.link).limit(1).maybeSingle();
-  if (existing) return { opportunity: existing, created: false };
+  const discoveryKey = opportunityDiscoveryKey(extracted.link, extracted.title);
+  const { data: exactKey, error: exactKeyError } = await supabase.from('opportunities').select('*').eq('sentinel_discovery_key', discoveryKey).maybeSingle();
+  if (exactKeyError) throw exactKeyError;
+  if (exactKey) return { opportunity: exactKey, created: false, duplicateReason: 'Mesma chave de descoberta.' };
+
+  const { data: candidates, error: candidatesError } = await supabase.from('opportunities').select('*').not('link', 'is', null);
+  if (candidatesError) throw candidatesError;
+  const existing = (candidates || []).find((candidate) => isDuplicateOpportunity(candidate, extracted));
+  if (existing) return { opportunity: existing, created: false, duplicateReason: 'Mesmo link oficial e nome equivalente.' };
+
   const row = {
-    title: extracted.name, description: extracted.summary || '', link: extracted.link,
-    deadline: extracted.deadline || null, areas: [], level: ['Ensino Médio'], location: null,
-    audience: [], cost: extracted.fees || null, language: null, keywords: ['Sentinel'],
+    title: extracted.title, description: extracted.description || '', link: canonicalizeOpportunityUrl(extracted.link),
+    deadline: extracted.deadline || null, areas: extracted.areas || [], level: extracted.level || ['Ensino Médio'], location: extracted.location || null,
+    audience: extracted.audience || [], cost: extracted.cost || null, language: extracted.language || null, keywords: extracted.keywords || ['Sentinel'],
     eligibility: Array.isArray(extracted.eligibility) ? extracted.eligibility.join('\n') : String(extracted.eligibility || ''),
-    process: null, applicants: null,
-    additionals: 'Descoberta automaticamente pelo Sentinel. Revise todos os campos antes de publicar.',
-    resources: [], status: 'Revisar', review: null, type: 'Programas Acadêmicos',
+    process: extracted.process || null, applicants: extracted.applicants || null,
+    additionals: [extracted.additionals, 'Descoberta automaticamente pelo Sentinel. Revise todos os campos antes de publicar.'].filter(Boolean).join('\n'),
+    resources: [], status: 'Revisar', review: null, type: extracted.type || 'Programas Acadêmicos',
+    sentinel_discovery_key: discoveryKey,
   };
   const { data, error } = await supabase.from('opportunities').insert(row).select().single();
+  if (error?.code === '23505') {
+    const { data: raced } = await supabase.from('opportunities').select('*').eq('sentinel_discovery_key', discoveryKey).single();
+    return { opportunity: raced, created: false, duplicateReason: 'Outra execução criou a oportunidade primeiro.' };
+  }
   if (error) throw error;
-  return { opportunity: data, created: true };
+  return { opportunity: data, created: true, duplicateReason: null };
+}
+
+async function updatePost(supabase, sourceUrl, patch) {
+  const { error } = await supabase.from('sentinel_posts').update(patch).eq('source_url', sourceUrl);
+  if (error) throw error;
 }
 
 async function processPost(supabase, post, runId, manual = false) {
   const sourceUrl = manual ? post.url : post.sourceUrl;
   const officialUrl = manual ? post.url : extractUrl(post.caption);
-  const now = new Date().toISOString();
   if (!officialUrl) {
-    await supabase.from('sentinel_posts').update({ status: 'rejected', error: 'Nenhum link encontrado na legenda.', processed_at: now, updated_at: now, run_id: runId }).eq('source_url', sourceUrl);
+    const now = new Date().toISOString();
+    await updatePost(supabase, sourceUrl, { status: 'rejected', error: 'Nenhum link oficial encontrado na legenda.', processed_at: now, updated_at: now, run_id: runId });
     return { status: 'rejected', metrics: emptyMetrics() };
   }
   try {
     const researched = await groundUrl(officialUrl, post.caption, post.ownerUsername, manual);
     if (!researched.result) {
-      await supabase.from('sentinel_posts').update({ status: 'rejected', processed_at: now, error: null, updated_at: now, run_id: runId }).eq('source_url', sourceUrl);
+      const now = new Date().toISOString();
+      await updatePost(supabase, sourceUrl, {
+        status: 'rejected', processed_at: now, updated_at: now, run_id: runId,
+        error: researched.rejectionReason || 'A fonte não atende aos critérios da busca.',
+        extracted: { evidence: researched.evidence || {}, _sentinel: { ...researched.trace, validation_notes: researched.validationNotes || [] } },
+      });
       return { status: 'rejected', metrics: researched.metrics };
     }
-    const { opportunity, created } = await findOrCreateOpportunity(supabase, researched.result);
-    await supabase.from('sentinel_posts').update({ status: 'qualified', opportunity_id: opportunity.id, extracted: researched.result, processed_at: now, error: null, updated_at: now, run_id: runId }).eq('source_url', sourceUrl);
-    return { status: 'qualified', opportunity, created, metrics: researched.metrics };
+    const { opportunity, created, duplicateReason } = await findOrCreateOpportunity(supabase, researched.result);
+    const now = new Date().toISOString();
+    const status = created ? 'qualified' : 'duplicate';
+    await updatePost(supabase, sourceUrl, {
+      status, opportunity_id: opportunity.id, processed_at: now, updated_at: now, run_id: runId,
+      error: duplicateReason ? `Duplicada: ${duplicateReason}` : null,
+      extracted: {
+        ...researched.result,
+        evidence: researched.evidence || {},
+        _sentinel: { ...researched.trace, validation_notes: researched.validationNotes || [], duplicate_of: created ? null : opportunity.id },
+      },
+    });
+    return { status, opportunity, created, duplicateReason, metrics: researched.metrics };
   } catch (error) {
-    await supabase.from('sentinel_posts').update({ status: 'failed', error: String(error.message || error).slice(0, 1000), processed_at: now, updated_at: now, run_id: runId }).eq('source_url', sourceUrl);
+    const now = new Date().toISOString();
+    try {
+      await updatePost(supabase, sourceUrl, { status: 'failed', error: String(error.message || error).slice(0, 1000), processed_at: now, updated_at: now, run_id: runId });
+    } catch (persistenceError) {
+      error.message = `${error.message || error}; falha ao registrar estado final: ${persistenceError.message}`;
+    }
     return {
       status: 'failed', error: error.message || String(error),
       metrics: addMetrics(error.metrics, { pageFetches: error.pageFetches || 0 }),
@@ -410,22 +569,46 @@ async function runDiscovery(supabase, maxCandidates, runId) {
     const { error } = await supabase.from('sentinel_posts').insert(scored.map((post) => ({
       source_url: post.sourceUrl, source_type: 'instagram', owner_username: post.ownerUsername,
       caption: post.caption, posted_at: post.timestamp, score: post.score, run_id: runId,
-      status: post.score >= SCORE_THRESHOLD ? 'pending' : 'screened_out',
+      status: post.score >= SCORE_THRESHOLD ? 'queued' : 'screened_out',
       processed_at: post.score >= SCORE_THRESHOLD ? null : new Date().toISOString(),
     })));
     if (error) throw error;
   }
-  const candidates = scored.filter((post) => post.score >= SCORE_THRESHOLD).sort((a, b) => b.score - a.score).slice(0, maxCandidates);
-  await updateRun(supabase, runId, { requested_count: candidates.length, metadata: { scraped: posts.length, new_posts: fresh.length } });
+  const staleBefore = new Date(Date.now() - 10 * 60_000).toISOString();
+  const { error: staleError } = await supabase.from('sentinel_posts').update({
+    status: 'queued', error: 'Execução anterior interrompida; devolvida à fila.', updated_at: new Date().toISOString(),
+  }).eq('status', 'pending').lt('updated_at', staleBefore);
+  if (staleError) throw staleError;
+
+  const { data: queued, error: queueError } = await supabase.from('sentinel_posts')
+    .select('*').eq('status', 'queued').order('score', { ascending: false }).order('created_at', { ascending: true }).limit(maxCandidates);
+  if (queueError) throw queueError;
+  const queuedUrls = (queued || []).map((row) => row.source_url);
+  let claimed = [];
+  if (queuedUrls.length) {
+    const { data: claimedRows, error: claimError } = await supabase.from('sentinel_posts').update({
+      status: 'pending', error: null, run_id: runId, updated_at: new Date().toISOString(),
+    }).in('source_url', queuedUrls).eq('status', 'queued').select('*');
+    if (claimError) throw claimError;
+    claimed = claimedRows || [];
+  }
+  const candidates = claimed.map((row) => ({
+    sourceUrl: row.source_url, caption: row.caption, ownerUsername: row.owner_username,
+    timestamp: row.posted_at, score: row.score,
+  }));
+  const { count: queuedRemaining } = await supabase.from('sentinel_posts').select('id', { count: 'exact', head: true }).eq('status', 'queued');
+  await updateRun(supabase, runId, { requested_count: candidates.length, metadata: { scraped: posts.length, new_posts: fresh.length, queued_remaining: queuedRemaining || 0 } });
   const results = await withConcurrency(candidates, 3, (post) => processPost(supabase, post, runId));
   const metrics = addMetrics(...results.map((item) => item.metrics));
   return {
     response: {
       scraped: posts.length, newPosts: fresh.length, candidates: candidates.length,
       qualified: results.filter((item) => item.status === 'qualified').length,
+      duplicates: results.filter((item) => item.status === 'duplicate').length,
       created: results.filter((item) => item.created).length,
       rejected: results.filter((item) => item.status === 'rejected').length,
       failed: results.filter((item) => item.status === 'failed').length,
+      queued: queuedRemaining || 0,
     },
     metrics,
   };
@@ -793,7 +976,14 @@ export default async function handler(req, res) {
   } catch (error) {
     console.error('[api/sentinel]', error);
     if (run?.id && supabase) {
-      try { await updateRun(supabase, run.id, { status: 'failed', error: String(error.message || error).slice(0, 2000), completed_at: new Date().toISOString() }); } catch { /* keep original error */ }
+      try {
+        const now = new Date().toISOString();
+        await supabase.from('sentinel_posts').update({
+          status: 'failed', error: `Execução interrompida: ${String(error.message || error).slice(0, 800)}`,
+          processed_at: now, updated_at: now,
+        }).eq('run_id', run.id).eq('status', 'pending');
+        await updateRun(supabase, run.id, { status: 'failed', error: String(error.message || error).slice(0, 2000), completed_at: now });
+      } catch { /* keep original error */ }
     }
     return res.status(error.statusCode || 500).json({ error: error.message || 'Falha ao executar o Sentinel.' });
   }

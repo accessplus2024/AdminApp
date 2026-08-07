@@ -95,6 +95,31 @@ function ModelAttempts({ entry }) {
   );
 }
 
+function DiscoveryDetails({ post }) {
+  const extracted = post.extracted || {};
+  const trace = extracted._sentinel || {};
+  const evidence = Object.entries(extracted.evidence || {});
+  const sources = trace.sources || [];
+  const notes = trace.validation_notes || [];
+  if (!evidence.length && !sources.length && !trace.model_attempts?.length && !notes.length) return null;
+  return (
+    <details className="sentinel-source-details">
+      <summary>Ver pesquisa<span>{sources.length} fonte(s)</span></summary>
+      <div className="sentinel-source-details__body">
+        <ModelAttempts entry={{ evidence: { _sentinel: trace } }} />
+        {evidence.map(([field, item]) => (
+          <div className="sentinel-source-evidence" key={field}>
+            <strong>{FIELD_LABELS[field] || field}</strong>
+            <Evidence value={item} />
+          </div>
+        ))}
+        {sources.length > 0 && <div className="sentinel-source-links"><strong>Páginas lidas</strong>{sources.map((source) => <a href={source.url} target="_blank" rel="noreferrer" key={source.url}>{source.relation || 'Fonte oficial'} {Ic('external-link', 'ico-xs')}</a>)}</div>}
+        {notes.length > 0 && <div className="sentinel-validation-notes"><strong>Validações</strong>{notes.map((note) => <span key={note}>{note}</span>)}</div>}
+      </div>
+    </details>
+  );
+}
+
 function RunLog({ run, now }) {
   const [eventsOpen, setEventsOpen] = useState(false);
   const isCatalog = run.run_type === 'catalog_review';
@@ -337,7 +362,7 @@ export default function Sentinel({ perms, opportunities = [], catalogLoading = f
     setDiscovering(true); setNotice(null);
     try {
       const result = await runSentinel(10);
-      const resultText = `${result.newPosts} posts novos · ${result.candidates} analisados · ${result.created} oportunidades enviadas para revisão.`;
+      const resultText = `${result.newPosts} posts novos · ${result.candidates} analisados · ${result.created} oportunidades enviadas para revisão · ${result.duplicates || 0} duplicata(s) vinculada(s) · ${result.queued || 0} na fila.`;
       setNotice({ type: 'success', text: resultText });
       await load();
       try { await onCatalogChanged?.(); }
@@ -491,9 +516,9 @@ export default function Sentinel({ perms, opportunities = [], catalogLoading = f
       {tab === 'discover' && (
         <>
           <section className="sentinel-hero"><div><span className="sentinel-eyebrow">RADAR DE OPORTUNIDADES</span><h2>Do sinal à revisão, sem planilha no caminho.</h2><p>Monitore fontes do Instagram ou pesquise uma URL. Novas oportunidades entram em revisão, nunca direto no catálogo público.</p></div><Button variant="primary" iconLeft={Ic(discovering ? 'loader-circle' : 'radar', 'ico-sm')} onClick={executeDiscovery} disabled={!perms.canWrite || discovering}>{discovering ? 'Analisando…' : 'Buscar agora'}</Button></section>
-          <div className="sentinel-stats"><Card><CardBody><Stat label="Posts no log" value={posts.length} icon={Ic('archive', 'ico-sm')} /></CardBody></Card><Card><CardBody><Stat label="Qualificadas" value={posts.filter((post) => post.status === 'qualified').length} icon={Ic('badge-check', 'ico-sm')} /></CardBody></Card><Card><CardBody><Stat label="Processando" value={posts.filter((post) => post.status === 'pending').length} icon={Ic('clock-3', 'ico-sm')} /></CardBody></Card><Card><CardBody><Stat label="Falhas" value={posts.filter((post) => post.status === 'failed').length} icon={Ic('triangle-alert', 'ico-sm')} /></CardBody></Card></div>
+          <div className="sentinel-stats"><Card><CardBody><Stat label="Na fila" value={posts.filter((post) => post.status === 'queued').length} icon={Ic('list-ordered', 'ico-sm')} /></CardBody></Card><Card><CardBody><Stat label="Processando" value={posts.filter((post) => post.status === 'pending').length} icon={Ic('clock-3', 'ico-sm')} /></CardBody></Card><Card><CardBody><Stat label="Qualificadas" value={posts.filter((post) => post.status === 'qualified').length} icon={Ic('badge-check', 'ico-sm')} /></CardBody></Card><Card><CardBody><Stat label="Duplicadas" value={posts.filter((post) => post.status === 'duplicate').length} icon={Ic('copy-check', 'ico-sm')} /></CardBody></Card><Card><CardBody><Stat label="Falhas" value={posts.filter((post) => post.status === 'failed').length} icon={Ic('triangle-alert', 'ico-sm')} /></CardBody></Card></div>
           <Card><CardHeader><CardTitle style={{ fontSize: 16 }}>Pesquisar uma URL</CardTitle><p className="card-helper">Use a pesquisa manual para uma nova oportunidade que ainda não está no catálogo.</p></CardHeader><CardBody><form className="sentinel-manual" onSubmit={addManual}><Input type="url" value={manualUrl} onChange={(event) => setManualUrl(event.target.value)} placeholder="https://programa.org/inscricoes" disabled={!perms.canWrite || discovering} /><Button type="submit" variant="outline" iconLeft={Ic('search', 'ico-xs')} disabled={!manualUrl.trim() || !perms.canWrite || discovering}>Pesquisar URL</Button></form></CardBody></Card>
-          <Card flat><CardHeader className="section-card-header"><div><CardTitle style={{ fontSize: 16 }}>Log de fontes</CardTitle><p className="card-helper">Posts processados e oportunidades criadas pelo radar.</p></div><Select value={logFilter} onChange={(event) => setLogFilter(event.target.value)} style={{ width: 180 }}><option value="all">Todos os status</option>{Object.entries(SENTINEL_STATUS).map(([value, config]) => <option key={value} value={value}>{config.label}</option>)}</Select></CardHeader><CardBody style={{ paddingTop: 8 }}>{filteredPosts.length === 0 ? <div className="workflow-empty">Nenhum registro neste filtro.</div> : <div className="sentinel-log">{filteredPosts.map((post) => { const status = SENTINEL_STATUS[post.status] || SENTINEL_STATUS.pending; return <article className="sentinel-log-row" key={post.id}><div className="sentinel-score">{post.score}</div><div className="sentinel-log-main"><div className="sentinel-log-meta"><strong>{post.source_type === 'manual' ? 'Entrada manual' : `@${post.owner_username || 'instagram'}`}</strong><span>{formatDate(post.processed_at || post.created_at)}</span><Badge variant={status.variant} dot>{status.label}</Badge></div><p>{post.opportunity?.title || post.error || post.caption || post.source_url}</p></div><a className="row-action" href={post.source_url} target="_blank" rel="noreferrer" aria-label="Abrir fonte">{Ic('external-link', 'ico-sm')}</a></article>; })}</div>}</CardBody></Card>
+          <Card flat><CardHeader className="section-card-header"><div><CardTitle style={{ fontSize: 16 }}>Log de fontes</CardTitle><p className="card-helper">Cada entrada termina com um resultado, motivo e fontes consultadas. Itens na fila ainda não consomem chamadas de IA.</p></div><Select value={logFilter} onChange={(event) => setLogFilter(event.target.value)} style={{ width: 180 }}><option value="all">Todos os status</option>{Object.entries(SENTINEL_STATUS).map(([value, config]) => <option key={value} value={value}>{config.label}</option>)}</Select></CardHeader><CardBody style={{ paddingTop: 8 }}>{filteredPosts.length === 0 ? <div className="workflow-empty">Nenhum registro neste filtro.</div> : <div className="sentinel-log">{filteredPosts.map((post) => { const status = SENTINEL_STATUS[post.status] || SENTINEL_STATUS.pending; return <article className="sentinel-log-row" key={post.id}><div className="sentinel-score">{post.score}</div><div className="sentinel-log-main"><div className="sentinel-log-meta"><strong>{post.source_type === 'manual' ? 'Entrada manual' : `@${post.owner_username || 'instagram'}`}</strong><span>{formatDate(post.processed_at || post.created_at)}</span><Badge variant={status.variant} dot>{status.label}</Badge></div><p>{post.opportunity?.title || post.caption || post.source_url}</p>{post.error && <small className="sentinel-log-error">{post.error}</small>}<DiscoveryDetails post={post} /></div><a className="row-action" href={post.source_url} target="_blank" rel="noreferrer" aria-label="Abrir fonte">{Ic('external-link', 'ico-sm')}</a></article>; })}</div>}</CardBody></Card>
         </>
       )}
 

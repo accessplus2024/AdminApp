@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  expiredStatusChange, extractAdjacentLinks, isPastDate, isPortugueseCatalogValue, normalizeDeadlineOutput,
+  canonicalizeOpportunityUrl, expiredStatusChange, extractAdjacentLinks, isDuplicateOpportunity,
+  isPastDate, isPortugueseCatalogValue, normalizeDeadlineOutput, opportunityDiscoveryKey,
   parseDateParts, validateFieldEvidence,
 } from './sentinel';
 
@@ -48,5 +49,27 @@ describe('Sentinel catalog evidence validation', () => {
       'https://example.org/important-dates',
       'https://example.org/apply',
     ]);
+  });
+
+  test('deduplicates title variants for the same official opportunity', () => {
+    const existing = {
+      title: 'SDG Innovation Summit Malaysia 2026',
+      link: 'https://thegyn.org/sism-2026/',
+    };
+    const extracted = {
+      title: 'SDG Innovation Summit Malaysia 2026 – Fully Funded Conference',
+      link: 'https://www.thegyn.org/sism-2026/?utm_source=instagram',
+    };
+    expect(canonicalizeOpportunityUrl(extracted.link)).toBe('https://thegyn.org/sism-2026');
+    expect(isDuplicateOpportunity(existing, extracted)).toBe(true);
+    expect(opportunityDiscoveryKey(existing.link, existing.title)).toBe(opportunityDiscoveryKey(extracted.link, extracted.title));
+  });
+
+  test('allows distinct programs to share an organization landing page', () => {
+    expect(isDuplicateOpportunity({
+      title: 'Campeonato Nacional de Debates Escolares', link: 'https://instagram.com/ibdebates',
+    }, {
+      title: 'USP Schools', link: 'https://instagram.com/ibdebates/',
+    })).toBe(false);
   });
 });
