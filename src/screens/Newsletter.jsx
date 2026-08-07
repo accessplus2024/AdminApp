@@ -59,7 +59,7 @@ function EntryEditor({ entry, index, total, onChange, onMove, onRemove }) {
       <div className="newsletter-entry-fields">
         <Field label="Título"><Input value={entry.title} onChange={(event) => patch('title', event.target.value)} /></Field>
         <Field label="Resumo"><Textarea value={entry.summary} onChange={(event) => patch('summary', event.target.value)} rows={4} /></Field>
-        <Field label="Elegibilidade"><Textarea value={entry.eligibility} onChange={(event) => patch('eligibility', event.target.value)} rows={3} /></Field>
+        <Field label="Elegibilidade" hint="Escreva um item curto por linha."><Textarea value={entry.eligibility} onChange={(event) => patch('eligibility', event.target.value)} rows={3} /></Field>
         <div className="newsletter-two-fields">
           <Field label="Prazo"><Input value={entry.deadline} onChange={(event) => patch('deadline', event.target.value)} /></Field>
           <Field label="Taxas"><Input value={entry.fees} onChange={(event) => patch('fees', event.target.value)} /></Field>
@@ -136,7 +136,7 @@ export default function Newsletter({ opportunities, perms }) {
     try {
       const saved = await saveNewsletterIssue({ ...issue, status }, entries);
       setIssue(saved); setEntries(saved.entries);
-      setNotice({ type: 'success', text: status === 'ready' ? 'Edição marcada como pronta.' : 'Rascunho salvo no Supabase.' });
+      setNotice({ type: 'success', text: status === 'ready' ? 'Edição pronta para envio.' : 'Rascunho salvo.' });
       await refresh(saved.id);
     } catch (error) { setNotice({ type: 'error', text: error.message }); }
     finally { setSaving(false); }
@@ -179,7 +179,7 @@ export default function Newsletter({ opportunities, perms }) {
         <div className="newsletter-toolbar"><Tabs items={tabs} value={tab} onChange={setTab} /><Button variant="primary" iconLeft={Ic('plus', 'ico-xs')} onClick={startNew} disabled={!perms.canWrite}>Nova edição</Button></div>
         {notice && <div className={`workflow-notice workflow-notice--${notice.type}`}>{notice.text}</div>}
         <Card flat>
-          <CardHeader><CardTitle style={{ fontSize: 16 }}>Arquivo editorial</CardTitle></CardHeader>
+          <CardHeader><CardTitle style={{ fontSize: 16 }}>Edições salvas</CardTitle></CardHeader>
           <CardBody className="issue-history">
             {issues.length === 0 ? <div className="workflow-empty">Nenhuma edição salva. Comece a primeira Weekly Drop.</div> : issues.map((item) => {
               const status = ISSUE_STATUS[item.status] || ISSUE_STATUS.draft;
@@ -221,10 +221,10 @@ export default function Newsletter({ opportunities, perms }) {
       <div className="newsletter-workspace">
         <div className="newsletter-compose">
           <Card>
-            <CardHeader><CardTitle style={{ fontSize: 16 }}>Envelope da edição</CardTitle><p className="card-helper">Assunto e preheader ficam guardados para você copiar ao criar o post no Beehiiv.</p></CardHeader>
+            <CardHeader><CardTitle style={{ fontSize: 16 }}>Detalhes do e-mail</CardTitle><p className="card-helper">Prepare o assunto e o texto de prévia usados no Beehiiv.</p></CardHeader>
             <CardBody className="newsletter-metadata">
               <Field label="Assunto"><Input value={issue.subject} placeholder={issue.title} onChange={(event) => patchIssue('subject', event.target.value)} /></Field>
-              <Field label="Preheader"><Input value={issue.preheader} placeholder="Uma prévia curta para a caixa de entrada" onChange={(event) => patchIssue('preheader', event.target.value)} /></Field>
+              <Field label="Texto de prévia"><Input value={issue.preheader} placeholder="Resuma a edição para a caixa de entrada" onChange={(event) => patchIssue('preheader', event.target.value)} /></Field>
               <Field label="Abertura"><Textarea rows={3} value={issue.intro} onChange={(event) => patchIssue('intro', event.target.value)} /></Field>
               <div className="newsletter-two-fields">
                 <Field label="Campanha UTM" hint="Adicionada aos links automaticamente."><Input value={issue.campaign_slug} onChange={(event) => patchIssue('campaign_slug', event.target.value)} /></Field>
@@ -241,9 +241,9 @@ export default function Newsletter({ opportunities, perms }) {
           </Card>
 
           <Card>
-            <CardHeader><CardTitle style={{ fontSize: 16 }}>Saída para Beehiiv</CardTitle><p className="card-helper">O preview usa o mesmo HTML inline que será copiado.</p></CardHeader>
+            <CardHeader><CardTitle style={{ fontSize: 16 }}>Prévia e HTML</CardTitle><p className="card-helper">A prévia mostra o mesmo conteúdo que você copiará para o Beehiiv.</p></CardHeader>
             <CardBody>
-              <iframe title="Preview da newsletter" className="newsletter-preview" sandbox="" srcDoc={`<!doctype html><html><body style="margin:0;background:#fff;">${html}</body></html>`} />
+              <iframe title="Prévia da newsletter" className="newsletter-preview" sandbox="" srcDoc={`<!doctype html><html><body style="margin:0;background:#fff;">${html}</body></html>`} />
               <details className="newsletter-code"><summary>Ver HTML gerado</summary><Textarea readOnly value={html} rows={12} /></details>
             </CardBody>
           </Card>
@@ -271,8 +271,8 @@ export default function Newsletter({ opportunities, perms }) {
           <Card className="newsletter-finish-card">
             <CardBody>
               <span>FECHAMENTO</span>
-              <h3>Pronta para sair?</h3>
-              <p>Copie o HTML, crie o post no Beehiiv e marque como enviada para registrar o histórico.</p>
+              <h3>Concluir edição</h3>
+              <p>Copie o HTML, crie o post no Beehiiv e registre o envio.</p>
               <Button variant="outline" onClick={() => save('ready')} disabled={!perms.canWrite || saving || entries.length === 0}>Marcar como pronta</Button>
               <Button variant="primary" iconLeft={Ic('check-circle-2', 'ico-xs')} onClick={markPublished} disabled={!perms.canWrite || saving || entries.length === 0 || issue.status === 'published'}>{issue.status === 'published' ? 'Envio registrado' : 'Marcar como enviada'}</Button>
             </CardBody>

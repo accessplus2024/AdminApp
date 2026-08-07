@@ -15,8 +15,8 @@ const MODEL_TIMEOUT_MS = Math.max(10_000, Math.min(Number(process.env.SENTINEL_M
 const MAX_ADJACENT_PAGES = Math.max(0, Math.min(Number(process.env.SENTINEL_ADJACENT_PAGES) || 2, 4));
 const SOURCE_CHAR_LIMIT = Math.max(12_000, Math.min(Number(process.env.SENTINEL_SOURCE_CHAR_LIMIT) || 24_000, 40_000));
 const MAX_DISCOVERY_CANDIDATES = 500;
-const CATALOG_PROMPT_VERSION = 'catalog-review-v5';
-const DISCOVERY_PROMPT_VERSION = 'discovery-v2';
+const CATALOG_PROMPT_VERSION = 'catalog-review-v6-ux';
+const DISCOVERY_PROMPT_VERSION = 'discovery-v3-ux';
 const SCORE_THRESHOLD = 4;
 const SOURCE_ACCOUNTS = ['opportunitydesk', 'opportunities_corners', 'opportunitiesforyouth', 'adroiteducation', 'borderless.so'];
 const HS_SIGNALS = ['high school', 'secondary school', 'high schooler', 'grade 9', 'grade 10', 'grade 11', 'grade 12'];
@@ -26,6 +26,8 @@ const BRAZIL_SIGNALS = ['brazil', 'brazilian', 'all nationals', 'open to all', '
 const UNIVERSITY_PENALTIES = ['phd', 'ph.d', 'doctorate', 'doctoral', 'postdoc', 'postdoctoral', "master's", 'masters', 'master degree', 'master of', 'professor', 'faculty', 'researcher', 'research grant', "bachelor's", 'bachelors', 'undergraduate degree'];
 const REVIEW_FIELDS = ['title', 'description', 'link', 'deadline', 'areas', 'level', 'location', 'audience', 'cost', 'language', 'keywords', 'eligibility', 'process', 'applicants', 'additionals', 'type', 'status'];
 const ARRAY_FIELDS = new Set(['areas', 'level', 'audience', 'keywords']);
+const LINE_LIST_FIELDS = new Set(['eligibility', 'applicants']);
+const REQUIRED_TEXT_FIELDS = new Set(['title', 'type', 'status']);
 const CONTROLLED_VALUES = {
   areas: new Set(['STEM', 'Humanas', 'Meio Ambiente', 'Linguagens', 'Artes']),
   level: new Set(['Ensino Médio', 'Fundamental', 'Gap Year']),
@@ -363,7 +365,7 @@ function parseJsonObject(raw) {
   return JSON.parse(match[0]);
 }
 
-function discoveryPrompt(manual = false) {
+export function discoveryPrompt(manual = false) {
   const today = new Date().toISOString().slice(0, 10);
   const cutoff = new Date(Date.now() + 30 * 86400_000).toISOString().slice(0, 10);
   const criteria = manual ? '' : `\nInclua apenas oportunidades gratuitas ou com apoio financeiro substancial, abertas a brasileiros, adequadas a estudantes de 14–18 anos e com prazo até ${cutoff}, contínuo ou desconhecido. Exclua oportunidades exclusivamente universitárias e prazos anteriores a ${today}.`;
@@ -385,10 +387,20 @@ IDIOMA E TAXONOMIA:
 - audience: Meninas, Escola Pública, Indígenas, Deficientes, Negros, LGBT ou Baixa Renda.
 - type: Programas Acadêmicos, Olimpíadas Científicas, Competições, Competições de Escrita, Mentorias, Bolsas de Estudo, Programas de Intercâmbio, MUNs ou Estágios.
 
+QUALIDADE DO TEXTO:
+- Escreva para estudantes e famílias, em linguagem simples, direta e sem tom promocional.
+- title deve conter apenas o nome oficial. Remova chamadas como "apply now" e "fully funded" quando não fizerem parte do nome.
+- description deve explicar o que é a oportunidade, para quem é e o principal apoio oferecido em até 45 palavras e duas frases.
+- eligibility alimenta a seção "Elegibilidade e guia de aplicação". Escreva até 7 itens curtos, um por linha, sem símbolos de bullet. Comece cada item com verbo e limite-o a 14 palavras. Inclua apenas critérios comprovados e nunca invente itens para completar a lista.
+- process deve orientar a candidatura em até três frases curtas, na ordem das ações.
+- applicants deve trazer somente dicas específicas e comprovadas pela fonte. Se houver apenas orientação genérica, use null.
+- additionals deve conter somente informação importante que não caiba nos outros campos. Não repita prazo, custo ou elegibilidade.
+- Não use reticências, placeholders, jargão corporativo nem frases como "orientações disponíveis no site".
+
 Cada campo preenchido deve ter evidence com citação literal e a URL exata da página onde o trecho foi encontrado. Se veio de inscrições, regulamento ou outra página adjacente, use essa URL, não a página principal.
 
 Responda SOMENTE com JSON cru:
-{"qualified":true,"title":"Nome oficial","description":"Resumo em português","link":"URL oficial","deadline":"4 de setembro de 2026","areas":["STEM"],"level":["Ensino Médio"],"location":"Candidatura remota; evento presencial em...","audience":[],"cost":"Gratuito","language":"Inglês","keywords":["tema"],"eligibility":"Critérios em português","process":"Processo em português","applicants":"Orientações em português","additionals":"Informações adicionais","type":"Programas Acadêmicos","evidence":{"deadline":{"quote":"Applications close on September 4, 2026","source_url":"https://example.org/apply","kind":"application_deadline"}}}
+{"qualified":true,"title":"Nome oficial","description":"Programa para estudantes que oferece formação e apoio financeiro.","link":"URL oficial","deadline":"4 de setembro de 2026","areas":["STEM"],"level":["Ensino Médio"],"location":"Candidatura remota; atividades presenciais em São Paulo","audience":[],"cost":"Gratuito","language":"Inglês","keywords":["tema"],"eligibility":"Estar no ensino médio\\nMorar no Brasil\\nEnviar o formulário até o prazo","process":"Preencha o formulário. Anexe os documentos solicitados. Envie a candidatura.","applicants":null,"additionals":null,"type":"Programas Acadêmicos","evidence":{"deadline":{"quote":"Applications close on September 4, 2026","source_url":"https://example.org/apply","kind":"application_deadline"}}}
 Se não se qualificar ou não houver dados suficientes: {"qualified":false,"reason":"motivo curto em português"}.`;
 }
 
@@ -476,7 +488,7 @@ async function findOrCreateOpportunity(supabase, extracted) {
     audience: extracted.audience || [], cost: extracted.cost || null, language: extracted.language || null, keywords: extracted.keywords || ['Sentinel'],
     eligibility: Array.isArray(extracted.eligibility) ? extracted.eligibility.join('\n') : String(extracted.eligibility || ''),
     process: extracted.process || null, applicants: extracted.applicants || null,
-    additionals: [extracted.additionals, 'Descoberta automaticamente pelo Sentinel. Revise todos os campos antes de publicar.'].filter(Boolean).join('\n'),
+    additionals: extracted.additionals || null,
     resources: [], status: 'Revisar', review: null, type: extracted.type || 'Programas Acadêmicos',
     sentinel_discovery_key: discoveryKey,
   };
@@ -625,9 +637,48 @@ export function discoveryCandidateLimit(body = {}) {
   return Math.max(1, Math.min(Number(body.maxCandidates) || 10, 25));
 }
 
-function catalogReviewPrompt(opportunity) {
+export function catalogReviewPrompt(opportunity) {
   const today = new Date().toISOString().slice(0, 10);
-  return `Você audita uma oportunidade já publicada no catálogo Access+. Hoje é ${today}. Compare os dados atuais com as fontes oficiais fornecidas. Baseie tudo SOMENTE no conteúdo das fontes; não invente nem complete por conhecimento prévio.\n\nREGRAS OBRIGATÓRIAS PARA PRAZOS:\n1. "deadline" é exclusivamente a data limite para enviar candidatura, inscrição, projeto ou indicação.\n2. Data do evento, competição, cerimônia, resultado, viagem, início do programa, pagamento ou rodada NÃO é deadline. Frases como "will be held on", "takes place on", "event date" e "finals are on" nunca comprovam prazo.\n3. Só proponha deadline quando a citação disser explicitamente deadline, applications close/due, registration closes/ends, submit by, register by, inscrições até, encerramento das inscrições, prazo ou expressão equivalente.\n4. Não infira um prazo a partir do calendário. Se não houver data limite explícita, não altere deadline.\n5. Prefira o ciclo atual ou futuro. Não misture datas de edições diferentes.\n6. Se houver dia, mês e ano, use exatamente "DD de mês de YYYY". Nunca troque um prazo específico por apenas um mês.\n7. Se o prazo confirmado já passou, inclua também status "Encerrada". Se a fonte disser explicitamente que as inscrições estão fechadas, proponha status "Encerrada" mesmo sem uma data.\n\nIDIOMA, CONDIÇÕES E TAXONOMIA:\n- Todos os valores de updates devem estar em português brasileiro. Traduza custos, critérios, formatos e descrições. Preserve em inglês apenas nomes próprios e URLs.\n- Em cost, preserve condições e etapas: diferencie taxa de candidatura da taxa cobrada apenas de finalistas ou participantes.\n- Em location, diferencie candidatura remota de evento ou final presencial. Uma sede presencial não prova que a candidatura deixou de ser remota; quando ambos forem relevantes, descreva as duas etapas.\n- areas aceita somente: STEM, Humanas, Meio Ambiente, Linguagens, Artes. Classifique pelo tema da oportunidade, não pelas modalidades de envio.\n- level aceita somente: Ensino Médio, Fundamental, Gap Year.\n- audience aceita somente: Meninas, Escola Pública, Indígenas, Deficientes, Negros, LGBT, Baixa Renda.\n- type aceita somente: Programas Acadêmicos, Olimpíadas Científicas, Competições, Competições de Escrita, Mentorias, Bolsas de Estudo, Programas de Intercâmbio, MUNs, Estágios.\n\nVocê também pode corrigir outros campos quando houver evidência clara. Campos permitidos: ${REVIEW_FIELDS.join(', ')}.\n\nCada campo alterado DEVE ter evidência estruturada com uma citação literal copiada de uma das fontes e a URL exata dessa fonte. A citação permanece no idioma original da fonte; apenas o valor proposto deve estar em português. Para deadline, use kind "application_deadline"; para inscrições contínuas, "rolling_deadline".\n\nResponda SOMENTE com JSON cru:\n{"updates":{"deadline":"17 de agosto de 2026"},"evidence":{"deadline":{"quote":"Applications close on 17 August 2026","source_url":"https://exemplo.org/apply","kind":"application_deadline"}},"notes":"observação curta em português"}\nInclua em updates apenas campos que realmente devem mudar. Se nada mudar: {"updates":{},"evidence":{},"notes":"Dados atuais confirmados"}.\n\nDados atuais:\n${JSON.stringify(Object.fromEntries(REVIEW_FIELDS.map((field) => [field, opportunity[field]])))}`;
+  return `Você audita uma oportunidade já publicada no catálogo Access+. Hoje é ${today}. Compare os dados atuais com as fontes oficiais fornecidas. Baseie tudo SOMENTE no conteúdo das fontes; não invente nem complete por conhecimento prévio.
+
+REGRAS OBRIGATÓRIAS PARA PRAZOS:
+1. "deadline" é exclusivamente a data limite para enviar candidatura, inscrição, projeto ou indicação.
+2. Data do evento, competição, cerimônia, resultado, viagem, início do programa, pagamento ou rodada NÃO é deadline. Frases como "will be held on", "takes place on", "event date" e "finals are on" nunca comprovam prazo.
+3. Só proponha deadline quando a citação disser explicitamente deadline, applications close/due, registration closes/ends, submit by, register by, inscrições até, encerramento das inscrições, prazo ou expressão equivalente.
+4. Não infira um prazo a partir do calendário. Se não houver data limite explícita, não altere deadline.
+5. Prefira o ciclo atual ou futuro. Não misture datas de edições diferentes.
+6. Se houver dia, mês e ano, use "D de mês de YYYY", sem zero à esquerda.
+7. Se o prazo confirmado já passou, inclua também status "Encerrada". Se a fonte disser explicitamente que as inscrições estão fechadas, proponha status "Encerrada" mesmo sem uma data.
+
+IDIOMA, CONDIÇÕES E TAXONOMIA:
+- Todos os valores de updates devem estar em português brasileiro. Traduza custos, critérios, formatos e descrições. Preserve em inglês apenas nomes próprios e URLs.
+- Em cost, preserve condições e etapas: diferencie taxa de candidatura da taxa cobrada apenas de finalistas ou participantes.
+- Em location, diferencie candidatura remota de evento ou final presencial. Uma sede presencial não prova que a candidatura deixou de ser remota; quando ambos forem relevantes, descreva as duas etapas.
+- areas aceita somente: STEM, Humanas, Meio Ambiente, Linguagens, Artes. Classifique pelo tema da oportunidade, não pelas modalidades de envio.
+- level aceita somente: Ensino Médio, Fundamental, Gap Year.
+- audience aceita somente: Meninas, Escola Pública, Indígenas, Deficientes, Negros, LGBT, Baixa Renda.
+- type aceita somente: Programas Acadêmicos, Olimpíadas Científicas, Competições, Competições de Escrita, Mentorias, Bolsas de Estudo, Programas de Intercâmbio, MUNs, Estágios.
+
+QUALIDADE DO TEXTO:
+- Escreva para estudantes e famílias, em linguagem simples, direta e sem tom promocional.
+- title deve conter apenas o nome oficial, sem chamadas promocionais.
+- description deve explicar o que é, para quem é e o principal apoio em até 45 palavras e duas frases.
+- eligibility alimenta a seção "Elegibilidade e guia de aplicação". Use até 7 itens curtos, um por linha e sem símbolos de bullet. Comece cada item com verbo, limite-o a 14 palavras e nunca invente itens para completar a lista.
+- process deve orientar a candidatura em até três frases curtas e na ordem das ações.
+- applicants deve trazer somente dicas específicas comprovadas pela fonte; se forem genéricas, use null.
+- additionals deve conter apenas informação importante que não caiba nos outros campos.
+- Não use reticências, placeholders, jargão corporativo nem frases como "orientações disponíveis no site".
+
+Você também pode corrigir outros campos quando houver evidência clara. Campos permitidos: ${REVIEW_FIELDS.join(', ')}.
+
+Cada campo alterado DEVE ter evidência estruturada com uma citação literal copiada de uma das fontes e a URL exata dessa fonte. A citação permanece no idioma original da fonte; apenas o valor proposto deve estar em português. Para deadline, use kind "application_deadline"; para inscrições contínuas, "rolling_deadline".
+
+Responda SOMENTE com JSON cru:
+{"updates":{"eligibility":"Ter de 14 a 18 anos\\nMorar no Brasil\\nEnviar o formulário até o prazo"},"evidence":{"eligibility":{"quote":"Applicants must be 14–18, reside in Brazil and submit the form by the deadline.","source_url":"https://exemplo.org/apply","kind":"field_evidence"}},"notes":"Critérios organizados para leitura rápida"}
+Inclua em updates apenas campos que realmente devem mudar. Se nada mudar: {"updates":{},"evidence":{},"notes":"Dados atuais confirmados"}.
+
+Dados atuais:
+${JSON.stringify(Object.fromEntries(REVIEW_FIELDS.map((field) => [field, opportunity[field]])))}`;
 }
 
 function normalizeUpdate(field, value) {
@@ -639,9 +690,50 @@ function normalizeUpdate(field, value) {
     return normalized;
   }
   if (typeof value !== 'string') return undefined;
+  if (LINE_LIST_FIELDS.has(field)) {
+    return normalizeLineList(value) || undefined;
+  }
   const normalized = field === 'deadline' ? normalizeDeadlineOutput(value) : value.trim();
   if (CONTROLLED_VALUES[field] && !CONTROLLED_VALUES[field].has(normalized)) return undefined;
   return normalized;
+}
+
+export function normalizeLineList(value) {
+  return [...new Set(String(value || '')
+    .split(/\r?\n/)
+    .map((item) => item.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, '').trim())
+    .filter(Boolean))]
+    .join('\n');
+}
+
+export function resolveProposalPatch(fields, proposed, requestedEdits = {}) {
+  const patch = {};
+  const editorFields = [];
+  for (const field of fields) {
+    if (!Object.prototype.hasOwnProperty.call(requestedEdits, field)) {
+      patch[field] = field === 'deadline' ? normalizeDeadlineOutput(proposed[field]) : proposed[field];
+      continue;
+    }
+    let raw = requestedEdits[field];
+    if (ARRAY_FIELDS.has(field) && typeof raw === 'string') {
+      raw = raw.split(/\r?\n|,/).map((item) => item.trim()).filter(Boolean);
+    }
+    if (typeof raw === 'string' && !raw.trim() && !REQUIRED_TEXT_FIELDS.has(field)) {
+      patch[field] = null;
+      editorFields.push(field);
+      continue;
+    }
+    const normalized = normalizeUpdate(field, raw);
+    if (normalized === undefined || (REQUIRED_TEXT_FIELDS.has(field) && !String(normalized).trim())) {
+      throw Object.assign(new Error(`O valor editado de ${field} é inválido.`), { statusCode: 400 });
+    }
+    if (!isPortugueseCatalogValue(field, normalized)) {
+      throw Object.assign(new Error(`O valor editado de ${field} precisa estar em português.`), { statusCode: 400 });
+    }
+    patch[field] = normalized;
+    editorFields.push(field);
+  }
+  return { patch, editorFields };
 }
 
 export function normalizeDeadlineOutput(value) {
@@ -904,28 +996,40 @@ async function finishReviewRun(supabase, runId) {
   return updateRun(supabase, runId, { status, completed_at: new Date().toISOString() });
 }
 
-async function applyProposal(supabase, user, proposalId, requestedFields) {
+async function applyProposal(supabase, user, proposalId, requestedFields, requestedEdits = {}) {
   const { data: proposal, error } = await supabase.from('sentinel_research_proposals').select('*').eq('id', proposalId).single();
   if (error || !proposal) throw Object.assign(new Error('Proposta não encontrada.'), { statusCode: 404 });
   if (proposal.status !== 'pending') throw Object.assign(new Error('Esta proposta já foi revisada.'), { statusCode: 409 });
   let fields = [...new Set((requestedFields || []).filter((field) => REVIEW_FIELDS.includes(field) && field in proposal.changes))];
-  if (fields.includes('deadline') && proposal.changes.status?.after === 'Encerrada' && isPastDate(proposal.proposed.deadline)) {
+  let resolved = resolveProposalPatch(fields, proposal.proposed, requestedEdits);
+  if (fields.includes('deadline') && proposal.changes.status?.after === 'Encerrada' && isPastDate(resolved.patch.deadline)) {
     fields = [...new Set([...fields, 'status'])];
+    resolved = resolveProposalPatch(fields, proposal.proposed, requestedEdits);
   }
   if (!fields.length) throw Object.assign(new Error('Selecione ao menos um campo para aplicar.'), { statusCode: 400 });
   const { data: opportunity, error: opportunityError } = await supabase.from('opportunities').select('*').eq('id', proposal.opportunity_id).single();
   if (opportunityError) throw opportunityError;
   const conflicts = fields.filter((field) => !equalValue(opportunity[field], proposal.original[field]));
   if (conflicts.length) throw Object.assign(new Error(`O catálogo mudou depois da pesquisa nos campos: ${conflicts.join(', ')}. Execute uma nova pesquisa.`), { statusCode: 409 });
-  const patch = Object.fromEntries(fields.map((field) => [field, field === 'deadline'
-    ? normalizeDeadlineOutput(proposal.proposed[field])
-    : proposal.proposed[field]]));
+  const { patch, editorFields } = resolved;
   const { error: updateError } = await supabase.from('opportunities').update(patch).eq('id', opportunity.id);
   if (updateError) throw updateError;
   const allFields = Object.keys(proposal.changes);
   const status = fields.length === allFields.length ? 'approved' : 'partially_approved';
+  const proposed = { ...proposal.proposed, ...patch };
+  const changes = { ...proposal.changes };
+  const evidence = { ...proposal.evidence };
+  for (const field of editorFields) {
+    changes[field] = { ...changes[field], after: patch[field] };
+    evidence[field] = {
+      ...(evidence[field] && typeof evidence[field] === 'object' ? evidence[field] : {}),
+      summary_pt: 'Valor ajustado manualmente durante a revisão.',
+      editor_override: true,
+    };
+  }
   const { data: updated, error: proposalError } = await supabase.from('sentinel_research_proposals').update({
-    status, approved_fields: fields, reviewed_by: user.id, reviewed_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+    status, proposed, changes, evidence, approved_fields: fields,
+    reviewed_by: user.id, reviewed_at: new Date().toISOString(), updated_at: new Date().toISOString(),
   }).eq('id', proposal.id).select().single();
   if (proposalError) throw proposalError;
   return updated;
@@ -981,7 +1085,7 @@ export default async function handler(req, res) {
     }
     if (action === 'review-batch') return res.status(200).json(await processReviewBatch(supabase, Number(req.body?.runId), req.body?.opportunityIds || []));
     if (action === 'review-finish') return res.status(200).json(await finishReviewRun(supabase, Number(req.body?.runId)));
-    if (action === 'proposal-apply') return res.status(200).json(await applyProposal(supabase, user, Number(req.body?.proposalId), req.body?.fields || []));
+    if (action === 'proposal-apply') return res.status(200).json(await applyProposal(supabase, user, Number(req.body?.proposalId), req.body?.fields || [], req.body?.edits || {}));
     if (action === 'proposal-reject') return res.status(200).json(await rejectProposal(supabase, user, Number(req.body?.proposalId)));
     return res.status(400).json({ error: 'Ação inválida.' });
   } catch (error) {

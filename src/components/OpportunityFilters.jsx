@@ -124,6 +124,9 @@ export function OpportunityFilters({
   children,
 }) {
   const [openKey, setOpenKey] = useState(null);
+  const resultCount = controller.rows.length;
+  const opportunityLabel = resultCount === 1 ? 'oportunidade' : 'oportunidades';
+  const filterLabel = controller.activeCount === 1 ? 'filtro' : 'filtros';
   return (
     <div className={`opportunity-filter-suite${compact ? ' opportunity-filter-suite--compact' : ''}`}>
       <div className="opportunity-filter-search">
@@ -144,7 +147,7 @@ export function OpportunityFilters({
         {(controller.activeCount > 0 || controller.query) && <button type="button" className="opportunity-filter-clear" onClick={controller.clear}>Limpar filtros</button>}
         {children}
       </div>
-      {showCount && <div className="opportunity-filter-count">{controller.rows.length} de {total ?? controller.rows.length} oportunidades{controller.activeCount ? ` · ${controller.activeCount} filtro(s)` : ''}</div>}
+      {showCount && <div className="opportunity-filter-count">{resultCount} de {total ?? resultCount} {opportunityLabel}{controller.activeCount ? ` · ${controller.activeCount} ${filterLabel}` : ''}</div>}
     </div>
   );
 }

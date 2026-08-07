@@ -1,8 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  canonicalizeOpportunityUrl, discoveryCandidateLimit, discoveryScreeningStatus, expiredStatusChange, extractAdjacentLinks, isDuplicateOpportunity,
-  isPastDate, isPortugueseCatalogValue, normalizeDeadlineOutput, opportunityDiscoveryKey,
-  parseDateParts, validateFieldEvidence,
+  canonicalizeOpportunityUrl, catalogReviewPrompt, discoveryCandidateLimit, discoveryPrompt,
+  discoveryScreeningStatus, expiredStatusChange, extractAdjacentLinks, isDuplicateOpportunity,
+  isPastDate, isPortugueseCatalogValue, normalizeDeadlineOutput, normalizeLineList,
+  opportunityDiscoveryKey, parseDateParts, resolveProposalPatch, validateFieldEvidence,
 } from './sentinel';
 
 describe('discoveryCandidateLimit', () => {
@@ -24,6 +25,21 @@ describe('discoveryScreeningStatus', () => {
 });
 
 describe('Sentinel catalog evidence validation', () => {
+  test('orienta os modelos a escrever elegibilidade como lista curta', () => {
+    for (const prompt of [discoveryPrompt(true), catalogReviewPrompt({})]) {
+      expect(prompt).toContain('Elegibilidade e guia de aplicação');
+      expect(prompt).toContain('um por linha');
+      expect(prompt).toContain('limite-o a 14 palavras');
+      expect(prompt).toContain('nunca invente itens');
+    }
+  });
+
+  test('normaliza marcadores sem alterar o conteúdo dos itens', () => {
+    expect(normalizeLineList('- Ter de 14 a 18 anos\n• Morar no Brasil\n2. Morar no Brasil')).toBe(
+      'Ter de 14 a 18 anos\nMorar no Brasil',
+    );
+  });
+
   test('formats Portuguese dates without a leading zero', () => {
     expect(normalizeDeadlineOutput('04 de setembro de 2026')).toBe('4 de setembro de 2026');
     expect(normalizeDeadlineOutput('14 de novembro de 2026')).toBe('14 de novembro de 2026');
@@ -89,5 +105,28 @@ describe('Sentinel catalog evidence validation', () => {
     }, {
       title: 'USP Schools', link: 'https://instagram.com/ibdebates/',
     })).toBe(false);
+  });
+});
+
+describe('Sentinel proposal edits', () => {
+  test('normaliza textos e listas editados antes de atualizar o catálogo', () => {
+    expect(resolveProposalPatch(
+      ['eligibility', 'areas', 'deadline'],
+      { eligibility: 'Original', areas: ['Humanas'], deadline: '04 de setembro de 2026' },
+      { eligibility: '- Ter de 14 a 18 anos\n• Morar no Brasil', areas: 'STEM\nArtes' },
+    )).toEqual({
+      patch: {
+        eligibility: 'Ter de 14 a 18 anos\nMorar no Brasil',
+        areas: ['STEM', 'Artes'],
+        deadline: '4 de setembro de 2026',
+      },
+      editorFields: ['eligibility', 'areas'],
+    });
+  });
+
+  test('rejeita valores editados fora da taxonomia', () => {
+    expect(() => resolveProposalPatch(['type'], { type: 'Mentorias' }, { type: 'Workshop' })).toThrow(
+      'O valor editado de type é inválido.',
+    );
   });
 });

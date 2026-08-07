@@ -631,6 +631,19 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; }
 .research-change-values del { color: var(--muted-foreground); text-decoration-color: var(--vermelha); }
 .research-change-values ins { color: #157a51; font-weight: 600; text-decoration: none; }
 .research-change-values > span { display: inline-flex; padding-top: 2px; color: var(--neutral-400); }
+.research-change-edit-trigger { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: start; gap: 7px; margin: -6px; padding: 6px; border: 1px solid transparent; border-radius: var(--radius-sm); color: inherit; background: transparent; font: inherit; line-height: inherit; text-align: left; cursor: text; transition: border-color .15s ease, background-color .15s ease; }
+.research-change-edit-trigger:hover { border-color: var(--neutral-200); background: var(--neutral-50); }
+.research-change-edit-trigger:focus-visible { outline: 2px solid var(--azul); outline-offset: 2px; }
+.research-change-edit-trigger > span { min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.research-change-edit-trigger > small { align-self: center; padding: 2px 6px; border-radius: var(--radius-pill); color: var(--azul); background: var(--azul-soft); font-size: 9px; line-height: 1.3; }
+.research-change-edit-trigger > svg { margin-top: 2px; color: var(--neutral-400); }
+.research-change-values ins[data-edited="true"] { color: var(--azul); }
+.research-change-values ins[data-editing="true"] { grid-column: 1 / -1; margin-top: 3px; }
+.research-change-editor { min-width: 0; display: flex; flex-direction: column; gap: 7px; }
+.research-change-editor .ap-input, .research-change-editor .ap-textarea, .research-change-editor .ap-select-wrap { width: 100%; min-width: 0; }
+.research-change-editor .ap-textarea { resize: vertical; }
+.research-change-editor__footer { display: flex; align-items: center; justify-content: flex-end; gap: 5px; flex-wrap: wrap; }
+.research-change-editor__footer small { flex: 1 1 140px; color: var(--muted-foreground); font-size: 9.5px; font-weight: 500; }
 .research-change > p, .research-evidence { grid-column: 2; color: var(--neutral-600); font-size: 10.5px; line-height: 1.45; }
 .research-evidence q { font-style: normal; }
 .research-evidence a { display: inline-flex; align-items: center; gap: 4px; margin-left: 8px; color: var(--azul); font-weight: 700; }

@@ -136,7 +136,7 @@ export default function OpportunityEditor({ opp, onCancel, onSave, onDelete }) {
         <Field label="Descrição" htmlFor="ed-d">
           <Textarea id="ed-d" rows={3} value={form.descricao} onChange={(e) => set('descricao', e.target.value)} placeholder="Explique, em linguagem simples, para quem é a oportunidade." />
         </Field>
-        <Field label="Elegibilidade e guia de aplicação" htmlFor="ed-el" hint="Um item por linha.">
+        <Field label="Elegibilidade e guia de aplicação" htmlFor="ed-el" hint="Escreva um item curto por linha.">
           <Textarea id="ed-el" rows={3} value={form.elegibilidade} onChange={(e) => set('elegibilidade', e.target.value)} />
         </Field>
         <Field label="Sobre o processo" htmlFor="ed-pr">

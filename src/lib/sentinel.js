@@ -110,5 +110,18 @@ export async function resumeCatalogResearch(run, onProgress) {
   return callSentinel({ action: 'review-finish', runId: run.id });
 }
 
-export const applyResearchProposal = (proposalId, fields) => callSentinel({ action: 'proposal-apply', proposalId, fields });
+const ARRAY_EDIT_FIELDS = new Set(['areas', 'level', 'audience', 'keywords']);
+
+export function serializeResearchEdits(edits = {}) {
+  return Object.fromEntries(Object.entries(edits).map(([field, value]) => [
+    field,
+    ARRAY_EDIT_FIELDS.has(field)
+      ? String(value || '').split(/\r?\n|,/).map((item) => item.trim()).filter(Boolean)
+      : value,
+  ]));
+}
+
+export const applyResearchProposal = (proposalId, fields, edits = {}) => callSentinel({
+  action: 'proposal-apply', proposalId, fields, edits: serializeResearchEdits(edits),
+});
 export const rejectResearchProposal = (proposalId) => callSentinel({ action: 'proposal-reject', proposalId });
