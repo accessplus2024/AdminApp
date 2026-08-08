@@ -25,6 +25,13 @@ export const PROPOSAL_STATUS = {
   failed: { label: 'Falhou', variant: 'danger' },
 };
 
+const RESEARCH_RUN_SELECT = [
+  'id', 'run_type', 'status', 'requested_count', 'processed_count', 'succeeded_count',
+  'failed_count', 'model', 'prompt_version', 'model_calls', 'page_fetches',
+  'input_tokens', 'output_tokens', 'metadata', 'error', 'created_by', 'started_at',
+  'completed_at', 'created_at',
+].join(',');
+
 export async function fetchSentinelPosts() {
   if (!isSupabaseConfigured) return [];
   const { data, error } = await supabase
@@ -36,19 +43,30 @@ export async function fetchSentinelPosts() {
   return data || [];
 }
 
-export async function fetchResearchRuns(limit = 50) {
+export async function fetchResearchRuns(limit = 20) {
   if (!isSupabaseConfigured) return [];
   const { data, error } = await supabase
     .from('sentinel_research_runs')
-    .select('*, proposals:sentinel_research_proposals(*, opportunity:opportunities(id,title,deadline,link,status)), posts:sentinel_posts(*, opportunity:opportunities(id,title,status))')
+    .select(RESEARCH_RUN_SELECT)
     .order('started_at', { ascending: false })
     .limit(limit);
   if (error) throw new Error(error.message);
-  return (data || []).map((run) => ({
-    ...run,
-    proposals: (run.proposals || []).sort((a, b) => a.id - b.id),
-    posts: (run.posts || []).sort((a, b) => new Date(a.created_at) - new Date(b.created_at)),
-  }));
+  return data || [];
+}
+
+export async function fetchResearchRun(runId) {
+  if (!isSupabaseConfigured || !runId) return null;
+  const { data, error } = await supabase
+    .from('sentinel_research_runs')
+    .select('*, proposals:sentinel_research_proposals(*, opportunity:opportunities(id,title,deadline,link,status)), posts:sentinel_posts(*, opportunity:opportunities(id,title,status))')
+    .eq('id', runId)
+    .single();
+  if (error) throw new Error(error.message);
+  return {
+    ...data,
+    proposals: (data.proposals || []).sort((a, b) => a.id - b.id),
+    posts: (data.posts || []).sort((a, b) => new Date(a.created_at) - new Date(b.created_at)),
+  };
 }
 
 async function callSentinel(body) {
@@ -110,7 +128,7 @@ export async function resumeCatalogResearch(run, onProgress) {
   return callSentinel({ action: 'review-finish', runId: run.id });
 }
 
-const ARRAY_EDIT_FIELDS = new Set(['areas', 'level', 'audience', 'keywords']);
+const ARRAY_EDIT_FIELDS = new Set(['areas', 'level', 'keywords']);
 
 export function serializeResearchEdits(edits = {}) {
   return Object.fromEntries(Object.entries(edits).map(([field, value]) => [

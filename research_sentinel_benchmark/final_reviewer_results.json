@@ -1,0 +1,57 @@
+{
+  "executed_at": "2026-08-08",
+  "prompt_version": "catalog-review-v9-holistic-coverage",
+  "persistence": "disabled",
+  "cases": [
+    {
+      "id": 260,
+      "title": "Olimpíada Brasileira de Biologia Sintética",
+      "reviewer_status": "pending",
+      "proposed": {
+        "description": "A Olimpíada Brasileira de Biologia Sintética (OBBS) é uma competição nacional que promove a educação em biologia sintética por meio de desafios interdisciplinares. Estudantes do Ensino Fundamental II e Ensino Médio participam de provas remotas, podendo ganhar medalhas e certificações.",
+        "link": "https://synbiobr.org/olimpiada/",
+        "deadline": "14 de agosto de 2026",
+        "audience": [],
+        "eligibility": "Ser matriculado no Ensino Fundamental II (6º‑9º ano) ou Ensino Médio (1ª‑3ª série) em escola pública ou privada, no território nacional",
+        "process": "A inscrição é feita por um(a) professor(a) ou coordenador(a) da escola, que preenche o formulário e envia a planilha de cadastro dos estudantes. Após validação, o responsável recebe e‑mail com login e senha dos alunos, até 3 dias antes da primeira fase.",
+        "applicants": "Recomenda-se que os estudantes estejam bem descansados e que leiam as questões com calma. Para aprofundamento, consulte o conteúdo programático e provas antigas.",
+        "additionals": "Os estudantes que se destacarem receberão medalhas de ouro, prata e bronze, e as escolas com mais inscritos e medalhistas receberão certificação especial."
+      },
+      "preserved_as_correct": ["areas", "level", "location", "cost", "type", "status"],
+      "rejected_for_weak_evidence": ["language"],
+      "metrics": { "modelCalls": 3, "pageFetches": 8, "inputTokens": 27137, "outputTokens": 2788 }
+    },
+    {
+      "id": 259,
+      "title": "Olimpíada Brasileira de Matemática Financeira",
+      "reviewer_status": "pending",
+      "proposed": {
+        "description": "A Olimpíada Brasileira de Matemática Financeira (OBMF) testa conhecimentos de finanças pessoais em situações cotidianas. Aberta a alunos da Educação Básica, EJA e adultos que concluíram o Ensino Médio.",
+        "deadline": "23 de setembro de 2026",
+        "audience": [],
+        "additionals": "Certificado digital gratuito para todos os participantes; medalha física opcional e paga, disponível entre 08/10 e 27/11/2026"
+      },
+      "preserved_as_correct": ["link", "level", "location", "cost", "eligibility", "type", "status"],
+      "rejected_for_weak_evidence": ["language", "process"],
+      "metrics": { "modelCalls": 3, "pageFetches": 4, "inputTokens": 21445, "outputTokens": 2226 }
+    },
+    {
+      "id": 255,
+      "title": "The Concord Review",
+      "reviewer_status": "pending",
+      "proposed": {
+        "link": "https://www.tcr.org/submit",
+        "deadline": "Inscrições contínuas",
+        "audience": [],
+        "cost": "$70 de taxa de submissão",
+        "eligibility": "Ser estudante de ensino médio que concluiu o ensaio antes de terminar o ensino secundário e ainda não se matriculou em universidade\nser o único autor\nnão publicado antes, exceto em publicação de escola secundária.",
+        "additionals": "Os autores recebem as próximas quatro edições eletrônicas gratuitamente; cópias impressas podem ser compradas na loja online.",
+        "status": "Aprovada"
+      },
+      "preserved_as_correct": ["areas", "level", "location", "language"],
+      "rejected_for_weak_evidence": ["description", "process"],
+      "post_capture_fix": "Generic essay competitions are now deterministically specialized as Competições de Escrita; this one-line fix was made after the captured run exposed the plural 'ensaios' miss.",
+      "metrics": { "modelCalls": 2, "pageFetches": 9, "inputTokens": 27938, "outputTokens": 2858 }
+    }
+  ]
+}

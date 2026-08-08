@@ -96,7 +96,7 @@ export default function Newsletter({ opportunities, perms }) {
   };
   useEffect(() => { refresh(); }, []);
 
-  const publishedOpportunities = useMemo(() => (opportunities || []).filter((opportunity) => opportunity.status === 'Publicada'), [opportunities]);
+  const publishedOpportunities = useMemo(() => (opportunities || []).filter((opportunity) => opportunity.status === 'Publicada' && opportunity.qualificacao !== 'unqualified'), [opportunities]);
   const opportunityFilter = useOpportunityFilters(publishedOpportunities);
   const selectedIds = useMemo(() => new Set(entries.map((entry) => String(entry.opportunity_id))), [entries]);
   const available = useMemo(() => opportunityFilter.rows

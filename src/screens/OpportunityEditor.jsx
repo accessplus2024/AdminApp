@@ -1,7 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Card, CardHeader, CardTitle, CardBody, Button, Input, Textarea, Select, Field, Switch, Badge, Dialog } from '../components';
+import TagSelector from '../components/TagSelector';
 import { Ic } from '../lib/icons';
 import D from '../lib/data';
+import { fetchOpportunityTags } from '../lib/tags';
 
 function Chips({ options, value, onToggle }) {
   return (
@@ -33,28 +35,51 @@ function EditorSection({ title, children }) {
   );
 }
 
-export default function OpportunityEditor({ opp, onCancel, onSave, onDelete }) {
+export default function OpportunityEditor({ opp, onCancel, onSave, onDelete, onRunSentinel, perms = { canWrite: true } }) {
   const isNew = !opp;
+  const unqualified = opp?.qualificacao === 'unqualified';
   const get = (k, d) => (opp && opp[k] != null ? opp[k] : d);
   const [form, setForm] = useState({
     titulo: get('titulo', ''), org: get('org', ''), tipo: get('tipo', 'Bolsas de Estudo'),
     link: get('link', ''), lingua: get('lingua', ''),
-    areaAtuacao: get('areaAtuacao', ''), custo: get('custo', 'Gratuito'), formato: get('formato', 'Online'),
+    areaAtuacao: get('areaAtuacao', ''), custo: get('custo', 'Gratuito'), formato: get('formato', 'Remoto'),
     local: get('local', ''), prazo: get('prazo', ''), dataInicio: get('dataInicio', ''),
     recursos: get('recursos', []),
-    nivel: get('nivel', []), publico: get('publico', []), interesse: get('interesse', []),
+    nivel: get('nivel', []), interesse: get('interesse', []),
     inscricoesAbertas: get('inscricoesAbertas', true), destaque: get('destaque', false),
     descricao: get('descricao', ''),
     elegibilidade: (get('elegibilidade', []) || []).join('\n'),
     processo: get('processo', ''),
     dicas: (get('dicas', []) || []).join('\n'),
     infoAdicional: get('infoAdicional', ''),
-    tags: (get('tagsRelacionadas', []) || []).join(', '),
+    tags: get('tagsRelacionadas', []) || [],
   });
+  const [availableTags, setAvailableTags] = useState([]);
+  const [researching, setResearching] = useState(false);
+  const [sentinelNotice, setSentinelNotice] = useState(null);
   const [confirm, setConfirm] = useState(false);
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
   const toggleIn = (k) => (o) => set(k, form[k].includes(o) ? form[k].filter((x) => x !== o) : form[k].concat(o));
   const F = (key) => D.filters.find((f) => f.key === key).options;
+
+  useEffect(() => {
+    let active = true;
+    fetchOpportunityTags({ activeOnly: true })
+      .then((rows) => { if (active) setAvailableTags(rows); })
+      .catch(() => {});
+    return () => { active = false; };
+  }, []);
+
+  const runSentinel = async () => {
+    if (!window.confirm('O Sentinel analisará a versão salva no catálogo. Mudanças ainda não salvas serão descartadas ao abrir a análise. Continuar?')) return;
+    setResearching(true); setSentinelNotice(null);
+    try {
+      const proposal = await onRunSentinel(opp);
+      setSentinelNotice(proposal);
+    } catch (error) {
+      setSentinelNotice({ error: error.message });
+    } finally { setResearching(false); }
+  };
 
   // --- Recursos online (vídeos, posts, links úteis) ---
   const addRecurso = (plataforma) =>
@@ -73,7 +98,18 @@ export default function OpportunityEditor({ opp, onCancel, onSave, onDelete }) {
           {isNew ? 'Nova oportunidade' : 'Editar oportunidade'}
         </h1>
         {!isNew && <Badge variant={D.statusVariant[opp.status]} dot>{opp.status}</Badge>}
+        <div style={{ flex: 1 }} />
+        {!isNew && onRunSentinel && <Button variant="outline" iconLeft={Ic('sparkles', 'ico-sm')} onClick={runSentinel} disabled={!perms.canWrite || researching}>{researching ? 'Analisando…' : 'Analisar com Sentinel'}</Button>}
       </div>
+
+      {sentinelNotice?.error && <div className="workflow-notice workflow-notice--error">A análise falhou. {sentinelNotice.error}</div>}
+      {sentinelNotice && !sentinelNotice.error && (
+        <div className="workflow-notice workflow-notice--success">
+          {sentinelNotice.changes > 0
+            ? 'Análise concluída. Abra o Sentinel para comparar as sugestões e as fontes.'
+            : 'Análise concluída. O Sentinel não encontrou mudanças comprovadas.'}
+        </div>
+      )}
 
       <EditorSection title="Informações básicas">
         <Field label="Título da oportunidade" htmlFor="ed-t">
@@ -109,7 +145,6 @@ export default function OpportunityEditor({ opp, onCancel, onSave, onDelete }) {
 
       <EditorSection title="Classificação">
         <Field label="Nível"><Chips options={F('nivel')} value={form.nivel} onToggle={toggleIn('nivel')} /></Field>
-        <Field label="Público-alvo"><Chips options={F('publico')} value={form.publico} onToggle={toggleIn('publico')} /></Field>
         <Field label="Interesse"><Chips options={F('interesse')} value={form.interesse} onToggle={toggleIn('interesse')} /></Field>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '14px 16px', background: 'var(--neutral-50)', borderRadius: 'var(--radius-md)' }}>
           <Switch label="Inscrições abertas" checked={form.inscricoesAbertas} onChange={(e) => set('inscricoesAbertas', e.target.checked)} />
@@ -119,16 +154,18 @@ export default function OpportunityEditor({ opp, onCancel, onSave, onDelete }) {
 
       <EditorSection title="Datas e formato">
         <div className="ap-form-grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-          <Field label="Prazo de inscrição" htmlFor="ed-p"><Input id="ed-p" value={form.prazo}      onChange={(e) => set('prazo', e.target.value)}      placeholder="Ex.: 30 jun 2026" /></Field>
+          <Field label="Prazo de inscrição" htmlFor="ed-p"><Input id="ed-p" value={form.prazo}      onChange={(e) => set('prazo', e.target.value)}      placeholder="Ex.: 30 de junho de 2026" /></Field>
           <Field label="Início"             htmlFor="ed-i"><Input id="ed-i" value={form.dataInicio} onChange={(e) => set('dataInicio', e.target.value)} placeholder="Ex.: Provas a partir de set 2026" /></Field>
         </div>
         <div className="ap-form-grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
           <Field label="Formato" htmlFor="ed-f">
-            <Select id="ed-f" value={form.formato} onChange={(e) => set('formato', e.target.value)}>
-              <option>Online</option><option>Presencial</option><option>Híbrido</option>
+            <Select id="ed-f" value={form.formato} onChange={(e) => {
+              setForm((current) => ({ ...current, formato: e.target.value, local: e.target.value === 'Remoto' ? '' : current.local }));
+            }}>
+              <option>Remoto</option><option>Presencial</option><option>Híbrido</option>
             </Select>
           </Field>
-          <Field label="Local" htmlFor="ed-l"><Input id="ed-l" value={form.local} onChange={(e) => set('local', e.target.value)} placeholder="Ex.: Nacional" /></Field>
+          {form.formato !== 'Remoto' && <Field label="Local" htmlFor="ed-l" hint="Informe onde acontecem as atividades presenciais."><Input id="ed-l" value={form.local} onChange={(e) => set('local', e.target.value)} placeholder="Ex.: Salvador, BA" /></Field>}
         </div>
       </EditorSection>
 
@@ -136,7 +173,7 @@ export default function OpportunityEditor({ opp, onCancel, onSave, onDelete }) {
         <Field label="Descrição" htmlFor="ed-d">
           <Textarea id="ed-d" rows={3} value={form.descricao} onChange={(e) => set('descricao', e.target.value)} placeholder="Explique, em linguagem simples, para quem é a oportunidade." />
         </Field>
-        <Field label="Elegibilidade e guia de aplicação" htmlFor="ed-el" hint="Escreva um item curto por linha.">
+        <Field label="Elegibilidade" htmlFor="ed-el" hint="Liste apenas quem pode participar, com um critério objetivo por linha.">
           <Textarea id="ed-el" rows={3} value={form.elegibilidade} onChange={(e) => set('elegibilidade', e.target.value)} />
         </Field>
         <Field label="Sobre o processo" htmlFor="ed-pr">
@@ -148,8 +185,8 @@ export default function OpportunityEditor({ opp, onCancel, onSave, onDelete }) {
         <Field label="Informações adicionais" htmlFor="ed-ia">
           <Textarea id="ed-ia" rows={2} value={form.infoAdicional} onChange={(e) => set('infoAdicional', e.target.value)} />
         </Field>
-        <Field label="Tags relacionadas" htmlFor="ed-tg" hint="Separadas por vírgula.">
-          <Input id="ed-tg" value={form.tags} onChange={(e) => set('tags', e.target.value)} />
+        <Field label="Tags" hint="Escolha termos específicos sobre temas, atividades, habilidades, entregas e benefícios.">
+          <TagSelector tags={availableTags} value={form.tags} onChange={(value) => set('tags', value)} disabled={!perms.canWrite} />
         </Field>
       </EditorSection>
 
@@ -197,7 +234,7 @@ export default function OpportunityEditor({ opp, onCancel, onSave, onDelete }) {
         <div style={{ flex: 1 }} />
         <Button variant="ghost" onClick={onCancel}>Cancelar</Button>
         <Button variant="outline" iconLeft={Ic('save', 'ico-sm')} onClick={() => onSave(form, 'Rascunho')}>Salvar rascunho</Button>
-        <Button variant="primary" iconLeft={Ic('send', 'ico-sm')} onClick={() => onSave(form, 'Publicada')}>Publicar</Button>
+        <Button variant="primary" iconLeft={Ic('send', 'ico-sm')} onClick={() => onSave(form, 'Publicada')} disabled={unqualified} title={unqualified ? 'Revise a qualificação antes de publicar.' : undefined}>Publicar</Button>
       </div>
 
       <Dialog open={confirm} onClose={() => setConfirm(false)}

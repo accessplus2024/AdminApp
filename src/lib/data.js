@@ -23,9 +23,6 @@ const D = {
     ] },
     { key: 'inscricoes', label: 'Disponibilidade', type: 'radio', options: ['Inscrições abertas', 'Inscrições encerradas'] },
     { key: 'nivel', label: 'Nível', type: 'check', options: ['Fundamental', 'Ensino Médio', 'Gap'] },
-    { key: 'publico', label: 'Público-alvo', type: 'check', options: [
-      'Negros', 'LGBT', 'Baixa Renda', 'Indígenas', 'Deficientes', 'Meninas', 'Escola Pública',
-    ] },
     { key: 'custo', label: 'Custo', type: 'check', options: ['Bolsa', 'Gratuito', 'Totalmente Financiado'] },
     { key: 'interesse', label: 'Interesse', type: 'check', options: ['Meio Ambiente', 'Humanas', 'STEM', 'Linguagens', 'Artes'] },
   ],

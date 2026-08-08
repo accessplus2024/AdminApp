@@ -12,31 +12,56 @@ const CONFIGURED_MODELS = (process.env.SENTINEL_MODELS || DEFAULT_MODELS.join(',
 const MODELS = CONFIGURED_MODELS.length ? CONFIGURED_MODELS : DEFAULT_MODELS;
 const MODEL = MODELS.join(' -> ');
 const MODEL_TIMEOUT_MS = Math.max(10_000, Math.min(Number(process.env.SENTINEL_MODEL_TIMEOUT_MS) || 45_000, 120_000));
-const MAX_ADJACENT_PAGES = Math.max(0, Math.min(Number(process.env.SENTINEL_ADJACENT_PAGES) || 2, 4));
-const SOURCE_CHAR_LIMIT = Math.max(12_000, Math.min(Number(process.env.SENTINEL_SOURCE_CHAR_LIMIT) || 24_000, 40_000));
+const MAX_ADJACENT_PAGES = Math.max(0, Math.min(Number(process.env.SENTINEL_ADJACENT_PAGES) || 8, 12));
+const SOURCE_CHAR_LIMIT = Math.max(18_000, Math.min(Number(process.env.SENTINEL_SOURCE_CHAR_LIMIT) || 48_000, 80_000));
 const MAX_DISCOVERY_CANDIDATES = 500;
-const CATALOG_PROMPT_VERSION = 'catalog-review-v6-ux';
-const DISCOVERY_PROMPT_VERSION = 'discovery-v3-ux';
-const SCORE_THRESHOLD = 4;
+const CATALOG_PROMPT_VERSION = 'catalog-review-v11-unified-research';
+const DISCOVERY_PROMPT_VERSION = 'discovery-v6-unified-research';
 const SOURCE_ACCOUNTS = ['opportunitydesk', 'opportunities_corners', 'opportunitiesforyouth', 'adroiteducation', 'borderless.so'];
 const HS_SIGNALS = ['high school', 'secondary school', 'high schooler', 'grade 9', 'grade 10', 'grade 11', 'grade 12'];
 const YOUTH_SIGNALS = ['youth', 'young people', 'teenager', 'teen', '16', '17', '18'];
 const FUNDING_SIGNALS = ['funded', 'fully funded', 'free', 'scholarship', 'grant', 'stipend', 'fellowship', 'financial aid', 'all expenses'];
 const BRAZIL_SIGNALS = ['brazil', 'brazilian', 'all nationals', 'open to all', 'all countries'];
 const UNIVERSITY_PENALTIES = ['phd', 'ph.d', 'doctorate', 'doctoral', 'postdoc', 'postdoctoral', "master's", 'masters', 'master degree', 'master of', 'professor', 'faculty', 'researcher', 'research grant', "bachelor's", 'bachelors', 'undergraduate degree'];
-const REVIEW_FIELDS = ['title', 'description', 'link', 'deadline', 'areas', 'level', 'location', 'audience', 'cost', 'language', 'keywords', 'eligibility', 'process', 'applicants', 'additionals', 'type', 'status'];
-const ARRAY_FIELDS = new Set(['areas', 'level', 'audience', 'keywords']);
+const REVIEW_FIELDS = ['title', 'description', 'link', 'deadline', 'areas', 'level', 'location', 'cost', 'language', 'keywords', 'eligibility', 'process', 'applicants', 'additionals', 'type', 'status', 'qualification_status', 'qualification_reason'];
+const MODEL_REVIEW_FIELDS = REVIEW_FIELDS.filter((field) => field !== 'status' && !field.startsWith('qualification_'));
+const ARRAY_FIELDS = new Set(['areas', 'level', 'keywords']);
 const LINE_LIST_FIELDS = new Set(['eligibility', 'applicants']);
 const REQUIRED_TEXT_FIELDS = new Set(['title', 'type', 'status']);
 const CONTROLLED_VALUES = {
   areas: new Set(['STEM', 'Humanas', 'Meio Ambiente', 'Linguagens', 'Artes']),
   level: new Set(['Ensino Médio', 'Fundamental', 'Gap Year']),
-  audience: new Set(['Meninas', 'Escola Pública', 'Indígenas', 'Deficientes', 'Negros', 'LGBT', 'Baixa Renda']),
   type: new Set(['Programas Acadêmicos', 'Olimpíadas Científicas', 'Competições', 'Competições de Escrita', 'Mentorias', 'Bolsas de Estudo', 'Programas de Intercâmbio', 'MUNs', 'Estágios']),
   status: new Set(['Aprovada', 'Revisar', 'Rascunho', 'Encerrada']),
+  qualification_status: new Set(['pending', 'qualified', 'unqualified']),
 };
-const PORTUGUESE_TEXT_FIELDS = new Set(['description', 'location', 'cost', 'language', 'eligibility', 'process', 'applicants', 'additionals', 'keywords']);
+const PORTUGUESE_TEXT_FIELDS = new Set(['description', 'location', 'cost', 'language', 'eligibility', 'process', 'applicants', 'additionals', 'keywords', 'qualification_reason']);
 const ENGLISH_CATALOG_PATTERN = /\b(?:application fee|participation fee|per project|per participant|fully funded|high school|undergraduate|graduate students?|applications?|registration|eligible|eligibility|deadline|in-person|online only|short film|speech|coding|entrepreneurship|scholarships?|fees?|free|USA)\b/i;
+const QUALIFICATION_VERDICTS = new Set(['qualified', 'unqualified', 'uncertain']);
+const BRAZIL_REACH_PATTERN = /\b(?:brasil|brazil|brasileir[oa]s?|brazilian|international students?|internationally|all nationalities|any nationality|all countries|any country|worldwide|global(?:ly)?|from every country|from around the world|qualquer nacionalidade|todas as nacionalidades|qualquer pais|todos os paises|mundo inteiro)\b/i;
+const BRAZIL_LOCAL_REACH_PATTERN = /\b(?:acre|acrean[oa]s?|alagoas|alagoan[oa]s?|amapa|amapaense?s?|amazonas|amazonense?s?|bahia|baian[oa]s?|ceara|cearense?s?|distrito federal|brasiliense?s?|espirito santo|capixaba?s?|goias|goian[oa]s?|maranhao|maranhense?s?|mato grosso(?: do sul)?|mato-grossense?s?|sul-mato-grossense?s?|minas gerais|mineir[oa]s?|(?:estado do|no|do) para|paraense?s?|paraiba|paraiban[oa]s?|parana|paranaense?s?|pernambuco|pernambucan[oa]s?|piaui|piauiense?s?|rio de janeiro|fluminense?s?|carioca?s?|rio grande do norte|potiguar(?:es)?|rio grande do sul|gauch[oa]s?|rondonia|rondoniense?s?|roraima|roraimense?s?|santa catarina|catarinense?s?|sao paulo|paulista?s?|sergipe|sergipan[oa]s?|tocantins|tocantinense?s?)\b/i;
+const YOUTH_PARTICIPATION_PATTERN = /\b(?:youth|young people|young person|student|students|school|college|university|undergraduate|teen|adolesc|jovens?|juventude|estudantes?|alun[oa]s?|universitari[oa]s?|graduand[oa]s?|ensino|escola|matriculad[oa]s?)\b/i;
+const POSITIVE_PARTICIPATION_PATTERN = /\b(?:may apply|can apply|eligible|open to|accepted|participate|participation|enrolled|must be enrolled|podem? (?:se )?(?:inscrever|candidatar|participar)|elegive(?:l|is)|abert[oa]s? a|aceita (?:candidaturas|inscricoes|participantes)|matriculad[oa]s?|estar (?:matriculad[oa]|cursando)|precisa estar)\b/i;
+const PARTICIPATION_EXCLUSION_PATTERN = /\b(?:only|exclusiv(?:e|ely|amente|os?|as?)|must be (?:a |an )?(?:citizen|resident|national)|citizens? or residents? of|open only to|not eligible|cannot apply|ineligible|somente|apenas|exclusiv[oa]s?|deve ser (?:cidad[aã]o|residente)|n[aã]o (?:pode|podem|eleg[ií]vel|aceita))\b/i;
+const BRAZIL_EXCLUSION_PATTERN = /\b(?:brazil(?:ian)?|brasil(?:eir[oa]s?)?).{0,80}\b(?:not eligible|cannot apply|ineligible|excluded|nao (?:pode|podem|e elegivel|sao elegiveis)|excluid[oa]s?)\b|\b(?:not eligible|cannot apply|ineligible|excluded|nao (?:pode|podem|e elegivel|sao elegiveis)|excluid[oa]s?).{0,80}\b(?:brazil(?:ian)?|brasil(?:eir[oa]s?)?)\b|\b(?:except|excluding|exceto|menos)\s+(?:o\s+)?(?:brazil|brasil)\b/i;
+const TAG_EXCLUSIONS = new Set([
+  'sentinel', 'remoto', 'online', 'presencial', 'hibrido', 'híbrido', 'ingles', 'inglês', 'portugues', 'português', 'espanhol',
+  'gratuito', 'gratis', 'grátis', 'pago', 'bolsa-de-estudo', 'totalmente-financiado', 'ensino-medio', 'ensino-médio',
+  'ensino-fundamental', 'fundamental', 'gap-year', 'programas-academicos', 'programas-acadêmicos', 'olimpiadas-cientificas',
+  'olimpíadas-científicas', 'competicoes', 'competições', 'competicoes-de-escrita', 'competições-de-escrita',
+  'mentorias', 'bolsas-de-estudo', 'programas-de-intercambio', 'programas-de-intercâmbio', 'muns', 'estagios', 'estágios',
+]);
+
+const ELIGIBILITY_PROCESS_GUIDANCE = [
+  '- eligibility alimenta somente a seção "Elegibilidade" e responde objetivamente: quem pode participar? Inclua apenas condições que selecionam ou excluem candidatos. Use até 7 itens curtos, um por linha, sem símbolos de bullet. Comece cada item com verbo, limite-o a 14 palavras e nunca invente itens para completar a lista.',
+  '- Não coloque em eligibility explicações sobre a oportunidade, etapas de inscrição, documentos ou trabalhos a enviar, temas, prazo, custo, benefícios, etapas de seleção nem o que acontece com os selecionados.',
+  '- process alimenta a seção "Sobre o processo". Coloque ali como se inscrever, o que enviar, temas ou formatos exigidos, etapas da seleção e o que acontece depois da seleção. Organize as ações em até cinco frases curtas.',
+  '- Analise eligibility e process em conjunto: mova para process todo conteúdo operacional ou explicativo que estiver em eligibility, sem perder informação e sem duplicá-la.',
+  '- Em process, não repita prazo, custo, local ou idioma já registrados nos campos próprios.',
+  '- O catálogo é voltado a estudantes brasileiros. Não escreva "Ser de qualquer lugar do mundo" nem equivalentes. Só inclua nacionalidade ou residência quando houver restrição real que afete brasileiros.',
+  '- Se language já informar "Inglês", não repita em eligibility requisitos genéricos como "Saber inglês". Mantenha apenas exigência linguística adicional, específica e eliminatória, como nota mínima comprovada em teste.',
+  '- Exemplo: para Câmara Mirim na Escola, eligibility deve ser apenas "Estar entre o 5º e 9º ano do Ensino Fundamental". O envio do projeto de lei, a participação da escola ou de educadores e as etapas de seleção pertencem a process.',
+].join('\n');
 
 function serverClient(req) {
   const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -121,7 +146,18 @@ function scorePost(post) {
 }
 
 export function discoveryScreeningStatus(score) {
-  return Number(score) >= SCORE_THRESHOLD ? 'queued' : 'rejected';
+  // Caption signals only order the queue. Qualification is decided after source research.
+  return 'queued';
+}
+
+async function activeOpportunityTagNames(supabase) {
+  const { data, error } = await supabase.from('opportunity_tags').select('name').eq('active', true)
+    .order('category').order('sort_order').order('name');
+  if (error) {
+    console.warn('[sentinel] não foi possível carregar o vocabulário de tags:', error.message);
+    return [];
+  }
+  return (data || []).map((tag) => String(tag.name || '').trim()).filter(Boolean);
 }
 
 function extractUrl(value) {
@@ -179,9 +215,17 @@ export function isDuplicateOpportunity(candidate, extracted) {
 }
 
 function decodeHtmlEntities(value) {
+  const named = {
+    aacute: '\u00e1', Aacute: '\u00c1', agrave: '\u00e0', Agrave: '\u00c0', acirc: '\u00e2', Acirc: '\u00c2', atilde: '\u00e3', Atilde: '\u00c3',
+    eacute: '\u00e9', Eacute: '\u00c9', ecirc: '\u00ea', Ecirc: '\u00ca', iacute: '\u00ed', Iacute: '\u00cd',
+    oacute: '\u00f3', Oacute: '\u00d3', ocirc: '\u00f4', Ocirc: '\u00d4', otilde: '\u00f5', Otilde: '\u00d5',
+    uacute: '\u00fa', Uacute: '\u00da', uuml: '\u00fc', Uuml: '\u00dc', ccedil: '\u00e7', Ccedil: '\u00c7',
+    ordm: '\u00ba', ordf: '\u00aa', ndash: '\u2013', mdash: '\u2014', bull: '\u2022', hellip: '\u2026',
+  };
   return String(value || '')
     .replace(/&#x([0-9a-f]+);/gi, (_, code) => String.fromCodePoint(parseInt(code, 16)))
     .replace(/&#(\d+);/g, (_, code) => String.fromCodePoint(Number(code)))
+    .replace(/&([a-z][a-z0-9]+);/gi, (entity, name) => named[name] ?? entity)
     .replace(/&amp;/gi, '&').replace(/&quot;/gi, '"').replace(/&apos;|&#39;/gi, "'").replace(/&nbsp;/gi, ' ');
 }
 
@@ -190,40 +234,116 @@ function stripHtml(html) {
 }
 
 const ADJACENT_LINK_SIGNALS = [
-  ['deadline', 12], ['application', 10], ['registration', 10], ['apply', 9], ['register', 9],
+  ['deadline', 12], ['application', 10], ['registration', 10], ['submission', 11], ['submit', 11],
+  ['apply', 9], ['register', 9],
   ['inscri', 10], ['prazo', 12], ['edital', 9], ['rules', 7], ['regulamento', 7],
   ['important dates', 9], ['timeline', 8], ['calendar', 6], ['faq', 5], ['eligibility', 5],
-  ['guide', 6], ['news', 4], ['resources', 3], ['schedule', 3],
+  ['guidelines', 8], ['guide', 6], ['news', 4], ['resources', 3], ['schedule', 3],
 ];
 const ADJACENT_LINK_BLOCKLIST = /(?:privacy|cookie|terms|login|sign[ -]?in|donate|sponsor|facebook|instagram|linkedin|youtube|mailto:|javascript:)/i;
 const ADJACENT_EVENT_PENALTY = /(?:will be held|takes place|event date|tournament day|logistics|finals?\b)/i;
+const RESEARCH_TOKEN_STOPWORDS = new Set(['para', 'programa', 'program', 'project', 'projeto', 'edicao', 'edition', 'especial', 'official', 'oficial', 'index', 'http', 'https', '2024', '2025', '2026', '2027']);
+const ARCHIVE_LINK_PENALTY = /(?:edições?[-\s]+anteriores|edicoes?[-\s]+anteriores|archive|past[-\s]+editions?|resultados?|selecionad[oa]s?)/i;
 
 function comparableHost(hostname) {
   return String(hostname || '').toLowerCase().replace(/^www\./, '');
 }
 
-export function extractAdjacentLinks(html, baseUrl) {
+function researchSourceAssessment(url, relation = '', { primaryUrl = '', discoveredFrom = null, depth = 0 } = {}) {
+  let host = '';
+  let primaryHost = '';
+  try { host = comparableHost(new URL(url).hostname); } catch { /* leave empty */ }
+  try { primaryHost = comparableHost(new URL(primaryUrl).hostname); } catch { /* leave empty */ }
+  const searchable = normalizedText(`${url} ${relation}`);
+  const isSocial = /(?:^|\.)(?:instagram|facebook|linkedin|tiktok|x|twitter)\.com$/.test(host);
+  const operational = /\b(?:apply|application|register|registration|submit|submission|rules|regulamento|edital|guidelines|inscri)\b/.test(searchable);
+  const sameHost = host && primaryHost && host === primaryHost;
+  if (operational && sameHost) return { authority: 'official_rules_or_application', trust_rank: 5, discovered_from: discoveredFrom };
+  if (sameHost && depth === 0) return { authority: 'seed_site_unverified', trust_rank: 3, discovered_from: discoveredFrom };
+  if (sameHost) return { authority: 'same_organization_site', trust_rank: 4, discovered_from: discoveredFrom };
+  if (isSocial) return { authority: 'social_lead', trust_rank: 1, discovered_from: discoveredFrom };
+  if (operational && discoveredFrom) return { authority: 'linked_application_platform', trust_rank: 3, discovered_from: discoveredFrom };
+  return { authority: 'third_party_or_unverified', trust_rank: 2, discovered_from: discoveredFrom };
+}
+
+const AUTHORITY_TRUST_RANK = {
+  official_rules_or_application: 5,
+  same_organization_site: 4,
+  seed_site_unverified: 3,
+  linked_application_platform: 3,
+  third_party_or_unverified: 2,
+  social_lead: 1,
+};
+
+function annotateResearchSource(source, context = {}) {
+  return { ...source, trust: researchSourceAssessment(source.url, source.relation, context) };
+}
+
+function researchTitleTokens(value) {
+  return [...new Set(normalizedText(value).split(/[^a-z0-9]+/)
+    .filter((token) => token.length >= 4 && !RESEARCH_TOKEN_STOPWORDS.has(token)))];
+}
+
+export function buildOpportunityResearchPlan(opportunity = {}) {
+  const year = String(opportunity.title || '').match(/\b20\d{2}\b/)?.[0] || String(new Date().getUTCFullYear());
+  return [
+    { id: 'current_cycle', question: `Qual é a edição vigente de ${opportunity.title || 'esta oportunidade'} em ${year}?`, signals: [year, 'edição', 'inscrições abertas', 'notícia', 'announcement'] },
+    { id: 'deadline_status', question: 'Quais são os prazos de candidatura e o estado atual das inscrições?', signals: ['prazo', 'inscrição', 'deadline', 'application', 'cronograma', 'calendar'] },
+    { id: 'participation', question: 'Quem pode participar e quais condições realmente selecionam candidatos?', signals: ['requisitos', 'elegibilidade', 'quem pode participar', 'eligibility', 'rules', 'regulamento'] },
+    { id: 'brazilian_youth', question: 'Existe ao menos um grupo de jovens brasileiros que atende à elegibilidade, inclusive grupos restritos a um estado, cidade, escola, série ou idade?', signals: ['Brasil', 'Brazil', 'nacionalidade', 'estado', 'cidade', 'escola', 'matriculado', 'youth', 'jovens', 'students'] },
+    { id: 'application', question: 'Como funciona a candidatura e quais materiais ou etapas são exigidos?', signals: ['formulário', 'como participar', 'application', 'apply', 'documentos', 'processo'] },
+    { id: 'logistics_support', question: 'Qual é o formato, local, custo, apoio e benefício oferecido?', signals: ['gratuito', 'custo', 'bolsa', 'prêmio', 'local', 'online', 'presencial', 'support'] },
+  ];
+}
+
+export function extractAdjacentLinks(html, baseUrl, context = {}) {
   let base;
   try { base = new URL(baseUrl); } catch { return []; }
   const baseHost = comparableHost(base.hostname);
+  const titleTokens = researchTitleTokens(context.title || '');
+  const researchYear = String(context.year || new Date().getUTCFullYear());
+  const basePathTokens = researchTitleTokens(base.pathname.replace(/index\.php/gi, ' '));
   const candidates = new Map();
+  const markdownAnchors = [...String(html || '').matchAll(/\[([^\]]{1,300})\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g)]
+    .map((match) => `<a href="${match[2].replace(/"/g, '&quot;')}">${match[1]}</a>`).join('\n');
+  const searchableMarkup = `${html}\n${markdownAnchors}`;
   const pattern = /<a\b[^>]*href\s*=\s*(["'])(.*?)\1[^>]*>([\s\S]*?)<\/a>/gi;
   let match;
-  while ((match = pattern.exec(String(html || '')))) {
+  while ((match = pattern.exec(searchableMarkup))) {
     const label = stripHtml(match[3]);
     const rawHref = decodeHtmlEntities(match[2].trim());
     const searchable = `${label} ${rawHref}`.toLowerCase();
+    const normalizedSearchable = normalizedText(searchable);
     if (!rawHref || ADJACENT_LINK_BLOCKLIST.test(searchable)) continue;
     let target;
     try { target = new URL(rawHref, base); } catch { continue; }
     if (!['http:', 'https:'].includes(target.protocol)) continue;
     target.hash = '';
     if (target.href === base.href || /\.(?:jpe?g|png|gif|webp|svg|zip|mp4|mp3)$/i.test(target.pathname)) continue;
-    const score = ADJACENT_LINK_SIGNALS.reduce((total, [signal, weight]) => total + (searchable.includes(signal) ? weight : 0), 0)
-      - (ADJACENT_EVENT_PENALTY.test(searchable) ? 4 : 0);
-    if (score <= 0) continue;
     const targetHost = comparableHost(target.hostname);
     const relatedHost = targetHost === baseHost || targetHost.endsWith(`.${baseHost}`) || baseHost.endsWith(`.${targetHost}`);
+    const matchedTitleTokens = titleTokens.filter((token) => normalizedSearchable.includes(token)).length;
+    const topicScore = matchedTitleTokens === titleTokens.length && titleTokens.length > 1
+      ? Math.min(matchedTitleTokens * 5, 15)
+      : matchedTitleTokens * 3;
+    const normalizedTargetPath = normalizedText(target.pathname);
+    const matchesBasePath = relatedHost && basePathTokens.length > 0
+      && basePathTokens.every((token) => normalizedTargetPath.includes(token));
+    const pathScore = matchesBasePath ? (basePathTokens.length === 1 ? 10 : 7) : 0;
+    const signalScore = ADJACENT_LINK_SIGNALS.reduce((total, [signal, weight]) => total + (searchable.includes(signal) ? weight : 0), 0);
+    if (relatedHost && basePathTokens.length && !matchesBasePath && matchedTitleTokens === 0 && signalScore < 9) continue;
+    if (titleTokens.length > 1 && matchedTitleTokens > 0 && matchedTitleTokens < titleTokens.length && signalScore === 0 && pathScore === 0) continue;
+    const yearScore = normalizedSearchable.includes(researchYear) && (matchedTitleTokens > 0 || signalScore > 0) ? 10 : 0;
+    const linkedYears = [...normalizedSearchable.matchAll(/\b(20\d{2})\b/g)].map((yearMatch) => Number(yearMatch[1]));
+    const staleYearPenalty = linkedYears.length
+      ? Math.min(20, Math.max(0, Number(researchYear) - Math.max(...linkedYears)) * 8)
+      : 0;
+    const score = signalScore
+      + Math.min(topicScore, 15) + pathScore + yearScore
+      - (ADJACENT_EVENT_PENALTY.test(searchable) ? 4 : 0)
+      - (ARCHIVE_LINK_PENALTY.test(normalizedSearchable) ? 15 : 0)
+      - staleYearPenalty;
+    if (score < 4) continue;
     if (!relatedHost && score < 9) continue;
     const previous = candidates.get(target.href);
     if (!previous || score > previous.score) candidates.set(target.href, { url: target.href, label, score });
@@ -231,63 +351,160 @@ export function extractAdjacentLinks(html, baseUrl) {
   return [...candidates.values()].sort((a, b) => b.score - a.score || a.url.localeCompare(b.url));
 }
 
-async function fetchPageText(url, { maxChars = 12_000, discoverLinks = false } = {}) {
+const DOCUMENT_SOURCE_PATTERN = /\.pdf(?:$|[?#])|drive\.google\.com\/file\/d\//i;
+
+function repairExtractedText(value) {
+  let text = String(value || '').replace(/\u0131/g, 'i');
+  for (let pass = 0; pass < 2; pass += 1) {
+    text = text.replace(/([A-Za-z])[´`¸~˜^¨]+\s*([A-Za-z])/g, '$1$2');
+  }
+  return text;
+}
+
+function compactResearchText(value, maxChars) {
+  const text = repairExtractedText(value).trim();
+  if (text.length <= maxChars) return text;
+  const segments = [text.slice(0, Math.min(1_800, Math.floor(maxChars / 3)))];
+  const marker = /(?:inscri|deadline|prazo|application|registration|submit|candidat|cronograma|calendar|eligib|participa)/gi;
+  let match;
+  while ((match = marker.exec(text)) && segments.join('\n\n').length < maxChars - 500) {
+    const excerpt = text.slice(Math.max(0, match.index - 280), Math.min(text.length, match.index + 720)).trim();
+    if (excerpt && !segments.some((segment) => segment.includes(excerpt))) segments.push(excerpt);
+  }
+  return segments.join('\n\n').slice(0, maxChars);
+}
+
+async function fetchReaderPage(url, { maxChars, discoverLinks, linkContext, pageFetches = 0 }) {
+  const fallback = await fetch(`https://r.jina.ai/${url}`, {
+    headers: { Accept: 'text/plain' },
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!fallback.ok) throw Object.assign(new Error(`HTTP ${fallback.status}`), { pageFetches: pageFetches + 1 });
+  const raw = repairExtractedText(await fallback.text());
+  return {
+    url,
+    text: compactResearchText(raw, maxChars),
+    links: discoverLinks ? extractAdjacentLinks(raw, url, linkContext) : [],
+    pageFetches: pageFetches + 1,
+  };
+}
+
+async function fetchPageText(url, { maxChars = 12_000, discoverLinks = false, linkContext = {} } = {}) {
+  if (DOCUMENT_SOURCE_PATTERN.test(url)) {
+    try {
+      return await fetchReaderPage(url, { maxChars, discoverLinks, linkContext });
+    } catch (error) {
+      throw Object.assign(new Error(`Não foi possível ler ${url} (${String(error.message || error)}).`), { pageFetches: error.pageFetches || 1 });
+    }
+  }
   let pageFetches = 0;
   try {
     pageFetches += 1;
     const response = await fetch(url, {
       redirect: 'follow',
-      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; AccessPlus-Sentinel/3.0)', Accept: 'text/html,text/plain' },
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; AccessPlus-Sentinel/3.0)', Accept: 'text/html,text/plain,application/pdf' },
       signal: AbortSignal.timeout(12_000),
     });
     if (response.ok) {
+      const contentType = String(response.headers.get('content-type') || '').toLowerCase();
+      if (contentType.includes('application/pdf')) {
+        return await fetchReaderPage(response.url || url, { maxChars, discoverLinks, linkContext, pageFetches });
+      }
       const raw = await response.text();
-      const text = stripHtml(raw).slice(0, maxChars);
-      if (text.length > 200) return {
-        url: response.url || url,
-        text,
-        links: discoverLinks ? extractAdjacentLinks(raw, response.url || url) : [],
-        pageFetches,
-      };
+      const finalUrl = response.url || url;
+      const text = compactResearchText(stripHtml(raw), maxChars);
+      const links = discoverLinks ? extractAdjacentLinks(raw, finalUrl, linkContext) : [];
+      if (text.length > 200) {
+        if (discoverLinks && links.length === 0) {
+          try {
+            const reader = await fetchReaderPage(finalUrl, { maxChars, discoverLinks, linkContext, pageFetches });
+            if (reader.text.length > text.length || reader.links.length > links.length) return reader;
+            pageFetches = reader.pageFetches;
+          } catch (error) { pageFetches = error.pageFetches || pageFetches; }
+        }
+        return { url: finalUrl, text, links, pageFetches };
+      }
     }
   } catch { /* use the text fallback */ }
 
-  pageFetches += 1;
   try {
-    const fallback = await fetch(`https://r.jina.ai/${url}`, {
-      headers: { Accept: 'text/plain' },
-      signal: AbortSignal.timeout(30_000),
-    });
-    if (!fallback.ok) throw new Error(`HTTP ${fallback.status}`);
-    return { url, text: (await fallback.text()).slice(0, maxChars), links: [], pageFetches };
+    return await fetchReaderPage(url, { maxChars, discoverLinks, linkContext, pageFetches });
   } catch (error) {
-    throw Object.assign(new Error(`Não foi possível ler ${url} (${String(error.message || error)}).`), { pageFetches });
+    throw Object.assign(new Error(`Não foi possível ler ${url} (${String(error.message || error)}).`), { pageFetches: error.pageFetches || pageFetches });
   }
 }
 
-async function fetchResearchSources(url) {
+export async function fetchResearchSources(url, opportunity = {}) {
+  const plan = buildOpportunityResearchPlan(opportunity);
+  const year = String(opportunity.title || '').match(/\b20\d{2}\b/)?.[0] || String(new Date().getUTCFullYear());
+  const linkContext = { title: opportunity.title || '', year, signals: plan.flatMap((topic) => topic.signals) };
   const primaryLimit = Math.min(12_000, SOURCE_CHAR_LIMIT);
-  const primary = await fetchPageText(url, { maxChars: primaryLimit, discoverLinks: true });
+  const primary = await fetchPageText(url, { maxChars: primaryLimit, discoverLinks: true, linkContext });
   const remainingChars = Math.max(0, SOURCE_CHAR_LIMIT - primary.text.length);
-  const adjacentLimit = MAX_ADJACENT_PAGES ? Math.max(3_000, Math.floor(remainingChars / MAX_ADJACENT_PAGES)) : 0;
-  const selectedLinks = primary.links.slice(0, MAX_ADJACENT_PAGES);
-  const adjacentResults = await withConcurrency(selectedLinks, 2, async (link) => {
-    try {
-      const page = await fetchPageText(link.url, { maxChars: adjacentLimit });
-      return { source: { url: page.url, text: page.text, relation: link.label || 'Link relacionado' }, pageFetches: page.pageFetches };
-    } catch (error) {
-      return { source: null, pageFetches: error.pageFetches || 0, error: `${link.url}: ${String(error.message || error)}` };
+  const adjacentLimit = MAX_ADJACENT_PAGES ? Math.max(4_000, Math.floor(remainingChars / MAX_ADJACENT_PAGES)) : 0;
+  const sources = [annotateResearchSource(
+    { url: primary.url, text: primary.text, relation: 'Fonte inicial', depth: 0 },
+    { primaryUrl: primary.url, depth: 0 },
+  )];
+  const failures = [];
+  const seen = new Set([canonicalizeOpportunityUrl(primary.url)]);
+  const queue = new Map();
+  const enqueue = (links, depth, discoveredFrom = primary.url) => {
+    for (const link of links || []) {
+      const key = canonicalizeOpportunityUrl(link.url);
+      if (!key || seen.has(key)) continue;
+      const candidate = { ...link, depth, discoveredFrom, priority: link.score - depth * 2 };
+      const previous = queue.get(key);
+      if (!previous || candidate.priority > previous.priority) queue.set(key, candidate);
     }
-  });
-  return {
-    sources: [{ url: primary.url, text: primary.text, relation: 'Página principal' }, ...adjacentResults.map((result) => result.source).filter(Boolean)],
-    pageFetches: primary.pageFetches + adjacentResults.reduce((total, result) => total + result.pageFetches, 0),
-    adjacentFailures: adjacentResults.filter((result) => result.error).map((result) => result.error),
   };
+  enqueue(primary.links, 1, primary.url);
+  let pageFetches = primary.pageFetches;
+  while (sources.length - 1 < MAX_ADJACENT_PAGES && queue.size) {
+    const batch = [...queue.entries()]
+      .sort(([, a], [, b]) => b.priority - a.priority || a.url.localeCompare(b.url))
+      .slice(0, Math.min(2, MAX_ADJACENT_PAGES - (sources.length - 1)));
+    for (const [key] of batch) { queue.delete(key); seen.add(key); }
+    const results = await Promise.all(batch.map(async ([, link]) => {
+      try {
+        const page = await fetchPageText(link.url, {
+          maxChars: adjacentLimit,
+          discoverLinks: link.depth < 3,
+          linkContext,
+        });
+        return { link, page };
+      } catch (error) {
+        return { link, error };
+      }
+    }));
+    for (const result of results) {
+      if (result.error) {
+        pageFetches += result.error.pageFetches || 0;
+        failures.push(`${result.link.url}: ${String(result.error.message || result.error)}`);
+        continue;
+      }
+      pageFetches += result.page.pageFetches;
+      const finalKey = canonicalizeOpportunityUrl(result.page.url);
+      if (!sources.some((source) => canonicalizeOpportunityUrl(source.url) === finalKey)) {
+        sources.push(annotateResearchSource({
+          url: result.page.url,
+          text: result.page.text,
+          relation: result.link.label || `Pesquisa relacionada (nível ${result.link.depth})`,
+          depth: result.link.depth,
+        }, {
+          primaryUrl: primary.url,
+          discoveredFrom: result.link.discoveredFrom || primary.url,
+          depth: result.link.depth,
+        }));
+      }
+      if (result.link.depth < 3) enqueue(result.page.links, result.link.depth + 1, result.page.url);
+    }
+  }
+  return { sources, pageFetches, adjacentFailures: failures, plan };
 }
 
 function sourcesForPrompt(sources) {
-  return sources.map((source, index) => `[FONTE ${index + 1}]\nURL: ${source.url}\nContexto: ${source.relation}\nConteúdo:\n${source.text}`).join('\n\n');
+  return sources.map((source, index) => `[FONTE ${index + 1}]\nURL: ${source.url}\nContexto: ${source.relation}\nAutoridade preliminar: ${source.trust?.authority || 'não avaliada'} (prioridade ${source.trust?.trust_rank ?? 0})\nDescoberta a partir de: ${source.trust?.discovered_from || 'entrada inicial'}\nConteúdo:\n${source.text}`).join('\n\n');
 }
 
 function openAiClient() {
@@ -312,7 +529,7 @@ function modelErrorMessage(error) {
   return String(error?.message || error || 'Falha desconhecida').slice(0, 500);
 }
 
-async function callModel(system, user) {
+async function callModel(system, user, { maxTokens = 2048 } = {}) {
   const attempts = [];
   let metrics = emptyMetrics();
   for (const model of MODELS) {
@@ -321,7 +538,7 @@ async function callModel(system, user) {
       const stream = await openAiClient().chat.completions.create({
         model,
         temperature: 0.15,
-        max_tokens: 2048,
+        max_tokens: maxTokens,
         messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
         ...modelRequestOptions(model),
         stream: true,
@@ -359,17 +576,74 @@ async function callModel(system, user) {
   throw error;
 }
 
-function parseJsonObject(raw) {
-  const match = raw.match(/\{[\s\S]*\}/);
-  if (!match) throw new Error('O modelo não devolveu um objeto JSON.');
-  return JSON.parse(match[0]);
+export function parseJsonObject(raw) {
+  const rawText = String(raw || '');
+  const objectStart = rawText.indexOf('{');
+  const match = rawText.match(/\{[\s\S]*\}/);
+  if (objectStart < 0) throw new Error('O modelo não devolveu um objeto JSON.');
+  try {
+    return JSON.parse(match?.[0] || rawText.slice(objectStart));
+  } catch (originalError) {
+    let candidate = rawText.slice(objectStart).replace(/```(?:json)?|```/gi, '').trim();
+    const stack = [];
+    let inString = false;
+    let escaped = false;
+    for (const char of candidate) {
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (char === '\\') escaped = true;
+        else if (char === '"') inString = false;
+        continue;
+      }
+      if (char === '"') inString = true;
+      else if (char === '{' || char === '[') stack.push(char);
+      else if (char === '}' && stack.at(-1) === '{') stack.pop();
+      else if (char === ']' && stack.at(-1) === '[') stack.pop();
+    }
+    if (inString) candidate += '"';
+    candidate = candidate.replace(/,\s*$/, '');
+    while (stack.length) candidate += stack.pop() === '{' ? '}' : ']';
+    try { return JSON.parse(candidate); } catch { throw originalError; }
+  }
 }
 
-export function discoveryPrompt(manual = false) {
+async function callStructuredModel(system, user, options = {}) {
+  let metrics = emptyMetrics();
+  const attempts = [];
+  let lastError;
+  for (let round = 0; round < 3; round += 1) {
+    const retryInstruction = round === 0
+      ? ''
+      : round === 1
+        ? '\n\nA resposta anterior não era JSON válido. Refaça a resposta completa, feche todos os arrays e objetos e devolva somente JSON cru.'
+        : '\n\nA resposta continuou inválida. Responda novamente com JSON cru, compacto e sintaticamente válido. Não use markdown nem texto fora do objeto.';
+    const response = await callModel(system, `${user}${retryInstruction}`, options);
+    metrics = addMetrics(metrics, response.metrics);
+    try {
+      return {
+        ...response,
+        parsed: parseJsonObject(response.content),
+        metrics,
+        attempts: [...attempts, ...response.attempts],
+      };
+    } catch (error) {
+      lastError = error;
+      attempts.push(...response.attempts.map((attempt) => ({
+        ...attempt,
+        status: 'invalid_json',
+        error: String(error.message || error),
+      })));
+    }
+  }
+  const error = new Error(`O modelo devolveu JSON inválido em três tentativas: ${String(lastError?.message || lastError)}`);
+  error.metrics = metrics;
+  error.modelAttempts = attempts;
+  throw error;
+}
+
+export function discoveryPrompt(manual = false, allowedTags = []) {
   const today = new Date().toISOString().slice(0, 10);
-  const cutoff = new Date(Date.now() + 30 * 86400_000).toISOString().slice(0, 10);
-  const criteria = manual ? '' : `\nInclua apenas oportunidades gratuitas ou com apoio financeiro substancial, abertas a brasileiros, adequadas a estudantes de 14–18 anos e com prazo até ${cutoff}, contínuo ou desconhecido. Exclua oportunidades exclusivamente universitárias e prazos anteriores a ${today}.`;
-  return `Você pesquisa novas oportunidades educacionais para estudantes brasileiros do ensino médio. Hoje é ${today}. Baseie tudo SOMENTE nas fontes fornecidas e não complete lacunas por conhecimento prévio.${criteria}
+  return `Você converte o dossiê factual validado do Sentinel em uma oportunidade do catálogo. Hoje é ${today}. Baseie tudo SOMENTE no dossiê e nas fontes fornecidas; não complete lacunas por conhecimento prévio. A qualificação já foi decidida pela etapa compartilhada de pesquisa.
 
 PRAZOS:
 1. deadline é somente a data limite para enviar candidatura, inscrição, projeto ou indicação.
@@ -381,18 +655,18 @@ PRAZOS:
 IDIOMA E TAXONOMIA:
 - Todos os valores, exceto nomes próprios, citações e URLs, devem estar em português brasileiro.
 - cost deve separar taxa de candidatura de taxas cobradas apenas de finalistas ou participantes.
-- location deve separar candidatura remota de evento ou final presencial.
+- location deve separar candidatura remota de evento ou final presencial. Se toda a oportunidade for remota, use exatamente "Remoto" e não inclua local.
 - areas: STEM, Humanas, Meio Ambiente, Linguagens ou Artes.
 - level: Ensino Médio, Fundamental ou Gap Year.
-- audience: Meninas, Escola Pública, Indígenas, Deficientes, Negros, LGBT ou Baixa Renda.
 - type: Programas Acadêmicos, Olimpíadas Científicas, Competições, Competições de Escrita, Mentorias, Bolsas de Estudo, Programas de Intercâmbio, MUNs ou Estágios.
+- keywords deve ter de 3 a 8 nomes seletivos do vocabulário ativo, sobre temas, atividades, habilidades, entregáveis ou benefícios. Não use formato, idioma, custo, tipo, nível escolar ou público demográfico como tag.
+${allowedTags.length ? `- Vocabulário ativo permitido para keywords: ${allowedTags.join(', ')}.` : ''}
 
 QUALIDADE DO TEXTO:
 - Escreva para estudantes e famílias, em linguagem simples, direta e sem tom promocional.
 - title deve conter apenas o nome oficial. Remova chamadas como "apply now" e "fully funded" quando não fizerem parte do nome.
 - description deve explicar o que é a oportunidade, para quem é e o principal apoio oferecido em até 45 palavras e duas frases.
-- eligibility alimenta a seção "Elegibilidade e guia de aplicação". Escreva até 7 itens curtos, um por linha, sem símbolos de bullet. Comece cada item com verbo e limite-o a 14 palavras. Inclua apenas critérios comprovados e nunca invente itens para completar a lista.
-- process deve orientar a candidatura em até três frases curtas, na ordem das ações.
+${ELIGIBILITY_PROCESS_GUIDANCE}
 - applicants deve trazer somente dicas específicas e comprovadas pela fonte. Se houver apenas orientação genérica, use null.
 - additionals deve conter somente informação importante que não caiba nos outros campos. Não repita prazo, custo ou elegibilidade.
 - Não use reticências, placeholders, jargão corporativo nem frases como "orientações disponíveis no site".
@@ -400,11 +674,10 @@ QUALIDADE DO TEXTO:
 Cada campo preenchido deve ter evidence com citação literal e a URL exata da página onde o trecho foi encontrado. Se veio de inscrições, regulamento ou outra página adjacente, use essa URL, não a página principal.
 
 Responda SOMENTE com JSON cru:
-{"qualified":true,"title":"Nome oficial","description":"Programa para estudantes que oferece formação e apoio financeiro.","link":"URL oficial","deadline":"4 de setembro de 2026","areas":["STEM"],"level":["Ensino Médio"],"location":"Candidatura remota; atividades presenciais em São Paulo","audience":[],"cost":"Gratuito","language":"Inglês","keywords":["tema"],"eligibility":"Estar no ensino médio\\nMorar no Brasil\\nEnviar o formulário até o prazo","process":"Preencha o formulário. Anexe os documentos solicitados. Envie a candidatura.","applicants":null,"additionals":null,"type":"Programas Acadêmicos","evidence":{"deadline":{"quote":"Applications close on September 4, 2026","source_url":"https://example.org/apply","kind":"application_deadline"}}}
-Se não se qualificar ou não houver dados suficientes: {"qualified":false,"reason":"motivo curto em português"}.`;
+{"title":"Nome oficial","description":"Programa para jovens que oferece formação e apoio.","link":"URL oficial","deadline":"4 de setembro de 2026","areas":["STEM"],"level":["Ensino Médio"],"location":"Remoto","cost":"Gratuito","language":"Inglês","keywords":["Inovação social","Gestão de projetos","Liderança"],"eligibility":"Estar matriculado","process":"Preencha o formulário. Anexe os documentos solicitados. Envie a candidatura.","applicants":null,"additionals":null,"type":"Programas Acadêmicos","evidence":{"deadline":{"quote":"Applications close on September 4, 2026","source_url":"https://example.org/apply","kind":"application_deadline"}}}`;
 }
 
-function normalizeDiscoveryResult(parsed, research, fallbackUrl) {
+export function normalizeDiscoveryResult(parsed, research, fallbackUrl, allowedTags = []) {
   if (parsed.qualified === false) return { result: null, rejectionReason: String(parsed.reason || 'Não atende aos critérios da busca.') };
   const aliases = { title: parsed.title || parsed.name, description: parsed.description || parsed.summary, cost: parsed.cost || parsed.fees };
   const result = {};
@@ -432,36 +705,104 @@ function normalizeDiscoveryResult(parsed, research, fallbackUrl) {
     }
     result[field] = normalized;
   }
+  if (result.eligibility) {
+    const objectiveEligibility = normalizeEligibilityForCatalog(result.eligibility, result.language, result);
+    if (objectiveEligibility !== result.eligibility) {
+      validationNotes.push('eligibility condensada para conter apenas critérios objetivos');
+    }
+    if (objectiveEligibility) result.eligibility = objectiveEligibility;
+    else delete result.eligibility;
+  }
   result.title = result.title || String(parsed.title || parsed.name || '').trim();
   const proposedLink = canonicalizeOpportunityUrl(result.link || parsed.link || fallbackUrl);
   const hostOf = (value) => { try { return comparableHost(new URL(value).hostname); } catch { return ''; } };
   const relatedLink = hostOf(proposedLink) && research.sources.some((source) => hostOf(source.url) === hostOf(proposedLink));
   result.link = relatedLink ? proposedLink : canonicalizeOpportunityUrl(research.sources[0]?.url || fallbackUrl);
   if (!result.title || !result.link) return { result: null, rejectionReason: 'A fonte não confirmou nome e link oficial suficientes.' };
-  if (result.deadline && isPastDate(result.deadline)) return { result: null, rejectionReason: `O prazo confirmado (${result.deadline}) já passou.` };
   result.description = result.description || 'Descrição ainda não confirmada. Revise antes de publicar.';
-  result.level = result.level?.length ? result.level : ['Ensino Médio'];
+  result.level = result.level || [];
   result.areas = result.areas || [];
-  result.audience = result.audience || [];
-  result.keywords = [...new Set([...(result.keywords || []), 'Sentinel'])];
+  result.keywords = normalizeKeywordTags(result.keywords || [], allowedTags);
   result.type = result.type || 'Programas Acadêmicos';
+  const closedEvidence = findExplicitClosedApplications(research.sources, result);
+  if ((result.deadline && isPastDate(result.deadline)) || closedEvidence) {
+    result.status = 'Encerrada';
+    validationNotes.push(result.deadline && isPastDate(result.deadline)
+      ? `status marcado como Encerrada porque o prazo confirmado (${result.deadline}) já passou`
+      : 'status marcado como Encerrada porque a fonte informa que as inscrições fecharam');
+  }
   return { result, evidence, validationNotes };
 }
 
-async function groundUrl(url, caption = '', ownerUsername = '', manual = false) {
-  const research = await fetchResearchSources(url);
-  let metrics = { ...emptyMetrics(), pageFetches: research.pageFetches };
+async function groundUrl(url, caption = '', ownerUsername = '', manual = false, sourceUrl = url, allowedTags = []) {
+  let metrics = emptyMetrics();
   try {
-    const response = await callModel(discoveryPrompt(manual), `Legenda: ${caption}\nConta: @${ownerUsername}\nURL inicial: ${url}\n\n${sourcesForPrompt(research.sources)}\n\nRetorne o JSON agora.`);
+    const dossier = await researchOpportunityDossier({
+      url,
+      opportunity: { link: url },
+      leadSource: caption ? { url: sourceUrl, text: caption, relation: manual ? 'Entrada manual' : `Post de origem @${ownerUsername}` } : null,
+    });
+    const { research, brief } = dossier;
+    metrics = dossier.metrics;
+    if (brief.qualification.verdict !== 'qualified') {
+      return {
+        result: null,
+        rejectionReason: brief.qualification.reason || 'As fontes não comprovam que jovens brasileiros podem participar.',
+        evidence: { _qualification: brief.qualification },
+        validationNotes: [`qualification: ${brief.qualification.verdict}`],
+        metrics,
+        trace: {
+          research_model: dossier.response.model,
+          model_attempts: dossier.response.attempts.map((attempt) => ({ ...attempt, phase: 'research_brief' })),
+          sources: research.sources.map((source) => ({ url: source.url, relation: source.relation, trust: source.trust })),
+          source_assessments: brief.source_assessments,
+          research_plan: research.plan,
+          research_brief: brief,
+          qualification: brief.qualification,
+          adjacent_failures: research.adjacentFailures,
+        },
+      };
+    }
+    let response = await callStructuredModel(
+      discoveryPrompt(manual, allowedTags),
+      `DOSSIÊ FACTUAL VALIDADO:\n${JSON.stringify(brief)}\n\nFONTES COMPLETAS:\n${sourcesForPrompt(research.sources)}\n\nRetorne o JSON do catálogo agora.`,
+    );
     metrics = addMetrics(metrics, response.metrics);
-    const normalized = normalizeDiscoveryResult(parseJsonObject(response.content), research, url);
+    let mappingAttempts = response.attempts.map((attempt) => ({ ...attempt, phase: 'catalog_mapping' }));
+    let normalized = normalizeDiscoveryResult(response.parsed, research, url, allowedTags);
+    if (allowedTags.length && normalized.result && normalized.result.keywords.length < 3) {
+      const retry = await callStructuredModel(
+        `${discoveryPrompt(manual, allowedTags)}\n\nCORREÇÃO OBRIGATÓRIA: a resposta anterior ficou com menos de 3 tags depois da validação. Escolha de 3 a 8 nomes EXATOS do vocabulário ativo.`,
+        `RESPOSTA ANTERIOR:\n${JSON.stringify(response.parsed)}\n\nDOSSIÊ FACTUAL VALIDADO:\n${JSON.stringify(brief)}\n\nFONTES COMPLETAS:\n${sourcesForPrompt(research.sources)}\n\nRetorne o JSON completo corrigido.`,
+      );
+      metrics = addMetrics(metrics, retry.metrics);
+      mappingAttempts = [...mappingAttempts, ...retry.attempts.map((attempt) => ({ ...attempt, phase: 'catalog_mapping_tag_retry' }))];
+      response = retry;
+      normalized = normalizeDiscoveryResult(response.parsed, research, url, allowedTags);
+      if (normalized.result && normalized.result.keywords.length < 3) {
+        normalized.validationNotes.push('keywords permaneceu com menos de 3 tags canônicas após nova tentativa');
+      }
+    }
+    if (normalized.result) {
+      normalized.result.qualification_status = 'qualified';
+      normalized.result.qualification_reason = brief.qualification.reason || 'As fontes comprovam participação de jovens brasileiros.';
+      normalized.evidence._qualification = brief.qualification;
+    }
     return {
       ...normalized,
       metrics,
       trace: {
         selected_model: response.model,
-        model_attempts: response.attempts,
-        sources: research.sources.map((source) => ({ url: source.url, relation: source.relation })),
+        research_model: dossier.response.model,
+        model_attempts: [
+          ...dossier.response.attempts.map((attempt) => ({ ...attempt, phase: 'research_brief' })),
+          ...mappingAttempts,
+        ],
+        sources: research.sources.map((source) => ({ url: source.url, relation: source.relation, trust: source.trust })),
+        source_assessments: brief.source_assessments,
+        research_plan: research.plan,
+        research_brief: brief,
+        qualification: brief.qualification,
         adjacent_failures: research.adjacentFailures,
       },
     };
@@ -484,12 +825,13 @@ async function findOrCreateOpportunity(supabase, extracted) {
 
   const row = {
     title: extracted.title, description: extracted.description || '', link: canonicalizeOpportunityUrl(extracted.link),
-    deadline: extracted.deadline || null, areas: extracted.areas || [], level: extracted.level || ['Ensino Médio'], location: extracted.location || null,
-    audience: extracted.audience || [], cost: extracted.cost || null, language: extracted.language || null, keywords: extracted.keywords || ['Sentinel'],
+    deadline: extracted.deadline || null, areas: extracted.areas || [], level: extracted.level || [], location: extracted.location || null,
+    cost: extracted.cost || null, language: extracted.language || null, keywords: normalizeKeywordTags(extracted.keywords || []),
     eligibility: Array.isArray(extracted.eligibility) ? extracted.eligibility.join('\n') : String(extracted.eligibility || ''),
     process: extracted.process || null, applicants: extracted.applicants || null,
     additionals: extracted.additionals || null,
-    resources: [], status: 'Revisar', review: null, type: extracted.type || 'Programas Acadêmicos',
+    resources: [], status: extracted.status === 'Encerrada' ? 'Encerrada' : 'Revisar', review: null, type: extracted.type || 'Programas Acadêmicos',
+    qualification_status: 'qualified', qualification_reason: extracted.qualification_reason || null,
     sentinel_discovery_key: discoveryKey,
   };
   const { data, error } = await supabase.from('opportunities').insert(row).select().single();
@@ -506,16 +848,11 @@ async function updatePost(supabase, sourceUrl, patch) {
   if (error) throw error;
 }
 
-async function processPost(supabase, post, runId, manual = false) {
+async function processPost(supabase, post, runId, manual = false, allowedTags = []) {
   const sourceUrl = manual ? post.url : post.sourceUrl;
   const officialUrl = manual ? post.url : extractUrl(post.caption);
-  if (!officialUrl) {
-    const now = new Date().toISOString();
-    await updatePost(supabase, sourceUrl, { status: 'rejected', error: 'Nenhum link oficial encontrado na legenda.', processed_at: now, updated_at: now, run_id: runId });
-    return { status: 'rejected', metrics: emptyMetrics() };
-  }
   try {
-    const researched = await groundUrl(officialUrl, post.caption, post.ownerUsername, manual);
+    const researched = await groundUrl(officialUrl || sourceUrl, post.caption, post.ownerUsername, manual, sourceUrl, allowedTags);
     if (!researched.result) {
       const now = new Date().toISOString();
       await updatePost(supabase, sourceUrl, {
@@ -587,8 +924,8 @@ async function runDiscovery(supabase, maxCandidates, runId) {
       source_url: post.sourceUrl, source_type: 'instagram', owner_username: post.ownerUsername,
       caption: post.caption, posted_at: post.timestamp, score: post.score, run_id: runId,
       status: discoveryScreeningStatus(post.score),
-      error: post.score >= SCORE_THRESHOLD ? null : `Rejeitada na triagem automática: pontuação ${post.score} abaixo do corte ${SCORE_THRESHOLD}.`,
-      processed_at: post.score >= SCORE_THRESHOLD ? null : new Date().toISOString(),
+      error: null,
+      processed_at: null,
     })));
     if (error) throw error;
   }
@@ -616,7 +953,8 @@ async function runDiscovery(supabase, maxCandidates, runId) {
   }));
   const { count: queuedRemaining } = await supabase.from('sentinel_posts').select('id', { count: 'exact', head: true }).eq('status', 'queued');
   await updateRun(supabase, runId, { requested_count: candidates.length, metadata: { scraped: posts.length, new_posts: fresh.length, queued_remaining: queuedRemaining || 0 } });
-  const results = await withConcurrency(candidates, 3, (post) => processPost(supabase, post, runId));
+  const allowedTags = await activeOpportunityTagNames(supabase);
+  const results = await withConcurrency(candidates, 3, (post) => processPost(supabase, post, runId, false, allowedTags));
   const metrics = addMetrics(...results.map((item) => item.metrics));
   return {
     response: {
@@ -637,9 +975,9 @@ export function discoveryCandidateLimit(body = {}) {
   return Math.max(1, Math.min(Number(body.maxCandidates) || 10, 25));
 }
 
-export function catalogReviewPrompt(opportunity) {
+export function catalogReviewPrompt(opportunity, allowedTags = []) {
   const today = new Date().toISOString().slice(0, 10);
-  return `Você audita uma oportunidade já publicada no catálogo Access+. Hoje é ${today}. Compare os dados atuais com as fontes oficiais fornecidas. Baseie tudo SOMENTE no conteúdo das fontes; não invente nem complete por conhecimento prévio.
+  return `Você converte o dossiê factual validado do Sentinel em correções para uma oportunidade já publicada. Hoje é ${today}. Compare os dados atuais com o dossiê e as fontes fornecidas. Não invente nem complete por conhecimento prévio. A etapa compartilhada de pesquisa já comparou a confiabilidade das fontes e decidiu a qualificação.
 
 REGRAS OBRIGATÓRIAS PARA PRAZOS:
 1. "deadline" é exclusivamente a data limite para enviar candidatura, inscrição, projeto ou indicação.
@@ -647,45 +985,278 @@ REGRAS OBRIGATÓRIAS PARA PRAZOS:
 3. Só proponha deadline quando a citação disser explicitamente deadline, applications close/due, registration closes/ends, submit by, register by, inscrições até, encerramento das inscrições, prazo ou expressão equivalente.
 4. Não infira um prazo a partir do calendário. Se não houver data limite explícita, não altere deadline.
 5. Prefira o ciclo atual ou futuro. Não misture datas de edições diferentes.
-6. Se houver dia, mês e ano, use "D de mês de YYYY", sem zero à esquerda.
+6. deadline deve ser uma data completa, com dia, mês e ano, no formato "D de mês de YYYY", sem zero à esquerda. Mês, estação ou ano isolado — como "agosto" ou "agosto de 2026" — não é deadline válido. Inscrições explicitamente contínuas são a única exceção sem data.
 7. Se o prazo confirmado já passou, inclua também status "Encerrada". Se a fonte disser explicitamente que as inscrições estão fechadas, proponha status "Encerrada" mesmo sem uma data.
+8. Se houver modalidades independentes, avalie todas antes de escolher deadline e status. Enquanto ao menos uma modalidade relevante aceitar inscrições, use o próximo prazo futuro dessa modalidade e não marque a oportunidade inteira como encerrada. Identifique a modalidade no texto. Só use "Encerrada" quando todas as formas relevantes de candidatura estiverem fechadas.
 
 IDIOMA, CONDIÇÕES E TAXONOMIA:
 - Todos os valores de updates devem estar em português brasileiro. Traduza custos, critérios, formatos e descrições. Preserve em inglês apenas nomes próprios e URLs.
 - Em cost, preserve condições e etapas: diferencie taxa de candidatura da taxa cobrada apenas de finalistas ou participantes.
-- Em location, diferencie candidatura remota de evento ou final presencial. Uma sede presencial não prova que a candidatura deixou de ser remota; quando ambos forem relevantes, descreva as duas etapas.
+- Em location, diferencie candidatura remota de evento ou final presencial. Uma sede presencial não prova que a candidatura deixou de ser remota; quando ambos forem relevantes, descreva as duas etapas. Se toda a oportunidade for remota, use exatamente "Remoto" e não inclua local.
 - areas aceita somente: STEM, Humanas, Meio Ambiente, Linguagens, Artes. Classifique pelo tema da oportunidade, não pelas modalidades de envio.
 - level aceita somente: Ensino Médio, Fundamental, Gap Year.
-- audience aceita somente: Meninas, Escola Pública, Indígenas, Deficientes, Negros, LGBT, Baixa Renda.
 - type aceita somente: Programas Acadêmicos, Olimpíadas Científicas, Competições, Competições de Escrita, Mentorias, Bolsas de Estudo, Programas de Intercâmbio, MUNs, Estágios.
+- Não inclua status, qualification_status nem qualification_reason em updates. A disponibilidade é calculada separadamente a partir dos prazos e a qualificação vem do veredito validado do dossiê; uma nunca substitui a outra.
+- keywords deve ter de 3 a 8 nomes seletivos do vocabulário ativo, sobre temas, atividades, habilidades, entregáveis ou benefícios. Não use formato, idioma, custo, tipo, nível escolar ou público demográfico como tag.
+${allowedTags.length ? `- Vocabulário ativo permitido para keywords: ${allowedTags.join(', ')}.` : ''}
 
 QUALIDADE DO TEXTO:
 - Escreva para estudantes e famílias, em linguagem simples, direta e sem tom promocional.
+- Antes de propor updates, analise a oportunidade como um conjunto: cruze todos os dados atuais com todas as fontes. Não trate cada campo isoladamente. Use toda a informação disponível e coloque cada fato no campo em que ele acrescenta valor, sem repeti-lo em outros campos.
+- Faça uma checagem explícita de todos os campos permitidos antes de responder. Corrija também valores existentes que sejam promocionais, desatualizados, não comprovados ou estejam no campo errado; não se limite ao deadline.
+- Se o link atual for uma página lateral, de prêmio ou arquivo e a pesquisa encontrar a página oficial de candidatura/submissão, atualize link para essa página operacional.
 - title deve conter apenas o nome oficial, sem chamadas promocionais.
 - description deve explicar o que é, para quem é e o principal apoio em até 45 palavras e duas frases.
-- eligibility alimenta a seção "Elegibilidade e guia de aplicação". Use até 7 itens curtos, um por linha e sem símbolos de bullet. Comece cada item com verbo, limite-o a 14 palavras e nunca invente itens para completar a lista.
-- process deve orientar a candidatura em até três frases curtas e na ordem das ações.
+${ELIGIBILITY_PROCESS_GUIDANCE}
+- Ao revisar eligibility existente, proponha sua limpeza quando ele repetir outros campos, estiver abstrato ou trouxer itens que não sejam critérios de elegibilidade, mesmo que as informações estejam corretas.
 - applicants deve trazer somente dicas específicas comprovadas pela fonte; se forem genéricas, use null.
 - additionals deve conter apenas informação importante que não caiba nos outros campos.
 - Não use reticências, placeholders, jargão corporativo nem frases como "orientações disponíveis no site".
 
-Você também pode corrigir outros campos quando houver evidência clara. Campos permitidos: ${REVIEW_FIELDS.join(', ')}.
+Você também pode corrigir outros campos quando houver evidência clara. Campos permitidos: ${MODEL_REVIEW_FIELDS.join(', ')}.
 
 Cada campo alterado DEVE ter evidência estruturada com uma citação literal copiada de uma das fontes e a URL exata dessa fonte. A citação permanece no idioma original da fonte; apenas o valor proposto deve estar em português. Para deadline, use kind "application_deadline"; para inscrições contínuas, "rolling_deadline".
 
 Responda SOMENTE com JSON cru:
-{"updates":{"eligibility":"Ter de 14 a 18 anos\\nMorar no Brasil\\nEnviar o formulário até o prazo"},"evidence":{"eligibility":{"quote":"Applicants must be 14–18, reside in Brazil and submit the form by the deadline.","source_url":"https://exemplo.org/apply","kind":"field_evidence"}},"notes":"Critérios organizados para leitura rápida"}
-Inclua em updates apenas campos que realmente devem mudar. Se nada mudar: {"updates":{},"evidence":{},"notes":"Dados atuais confirmados"}.
+{"updates":{"eligibility":"Estar matriculado","keywords":["Inovação social","Gestão de projetos","Liderança"]},"evidence":{"eligibility":{"quote":"Applicants must be enrolled students.","source_url":"https://exemplo.org/apply","kind":"field_evidence"},"keywords":{"quote":"Participants develop social innovation projects and leadership skills.","source_url":"https://exemplo.org/program","kind":"field_evidence"}}}
+Inclua em updates apenas campos que realmente devem mudar. Se nada mudar: {"updates":{},"evidence":{}}.
 
 Dados atuais:
-${JSON.stringify(Object.fromEntries(REVIEW_FIELDS.map((field) => [field, opportunity[field]])))}`;
+${JSON.stringify(Object.fromEntries(MODEL_REVIEW_FIELDS.map((field) => [field, opportunity[field]])))}`;
+}
+
+export function catalogCoverageFields(opportunity = {}, updates = {}, allowedTags = []) {
+  const fields = [];
+  const missing = (field) => !Object.prototype.hasOwnProperty.call(updates, field);
+  if (missing('description') && String(opportunity.description || '').trim().split(/\s+/).filter(Boolean).length > 45) fields.push('description');
+  if (missing('language') && !String(opportunity.language || '').trim()) fields.push('language');
+  const keywordCandidate = missing('keywords') ? (opportunity.keywords || []) : updates.keywords;
+  const normalizedKeywords = normalizeKeywordTags(keywordCandidate, allowedTags);
+  if (normalizedKeywords.length < 3 || normalizedKeywords.length > 8
+    || !equalValue(normalizedKeywords, keywordCandidate || [])) fields.push('keywords');
+  if (missing('process') && (!String(opportunity.process || '').trim() || ENGLISH_CATALOG_PATTERN.test(String(opportunity.process || ''))
+    || String(opportunity.process || '').split(/[.!?]+/).filter((part) => part.trim()).length > 5)) fields.push('process');
+  if (missing('applicants') && String(opportunity.applicants || '').length > 220) fields.push('applicants');
+  const rawEligibility = String(opportunity.eligibility || '').trim();
+  const eligibilityLines = rawEligibility.split(/\r?\n|;\s*/).map((line) => line.trim()).filter(Boolean);
+  const abstractEligibility = eligibilityLines.some((line) => line.split(/\s+/).filter(Boolean).length > 14)
+    || /(?:podem participar|sao convidados|processo seletivo|interessad[oa]s?|para defend[eê]-?l[oa]s?)/i.test(normalizedText(rawEligibility));
+  const misplacedEligibility = /(?:qualquer\s+(?:lugar|pais|parte)\s+do\s+mundo|em\s+ingles|US\$|taxa|\d[.,]?\d{3}\s*palavras?|enviar|inscrever|formulario|projeto de lei|processo seletivo)/i
+    .test(normalizedText(rawEligibility));
+  const eligibilityNeedsRewrite = abstractEligibility || misplacedEligibility;
+  if (missing('eligibility') && eligibilityNeedsRewrite) fields.push('eligibility');
+  if (eligibilityNeedsRewrite && missing('process') && !fields.includes('process')) fields.push('process');
+  if (missing('status') && opportunity.status === 'Revisar') fields.push('status');
+  if (missing('type') && normalizedText(opportunity.type) === 'competicoes'
+    && /\b(?:ensaio|redacao|escrita|essay|writing)\b/.test(normalizedText(`${opportunity.title} ${opportunity.description}`))) fields.push('type');
+  return fields;
+}
+
+export function researchBriefPrompt(opportunity, plan = buildOpportunityResearchPlan(opportunity)) {
+  return `Você é a etapa de pesquisa factual do Sentinel. Reúna os fatos da oportunidade como um todo ANTES de pensar nos campos do catálogo Access+.
+
+REGRAS:
+- Trate a fonte inicial como uma pista, não como automaticamente oficial. Compare autoria, ligação com a organização, edição e atualidade de todas as fontes.
+- Em conflitos, priorize nesta ordem: regulamento ou página de candidatura da organização na edição vigente; anúncio vigente da organização; canal social oficial; plataforma externa ligada pela organização; fonte independente; agregador ou post social não verificado. Registre o conflito mesmo depois de resolvê-lo.
+- Percorra todos os tópicos do plano e combine informações complementares entre página principal, edição vigente, notícia, regulamento e formulário.
+- Prefira a edição atual ou futura e identifique claramente quando uma informação pertence a outra edição ou modalidade.
+- Diferencie prazo de inscrição, prazo de entrega posterior, resultado e data do evento.
+- Quando houver modalidades independentes, registre separadamente o prazo e o estado de cada uma; não trate o encerramento de uma modalidade como encerramento de todas.
+- Não converta os fatos em campos do catálogo, não resuma por campo e não descarte fatos só porque parecem redundantes nesta etapa.
+- Cada fato deve ter uma citação literal curta e a URL exata da fonte.
+- Registre todos os fatos materiais encontrados, não apenas datas. Quando houver informação, cubra elegibilidade, formato, custo, idioma, processo, entrega exigida, benefícios e dicas específicas.
+- Copie a citação como um trecho contínuo e literal da fonte, sem juntar frases distantes nem reescrever palavras; citações não literais serão descartadas.
+- Registre lacunas e conflitos explicitamente; não invente respostas.
+- A única regra de qualificação é: existe uma interseção não vazia entre quem pode participar e jovens brasileiros. Basta que ao menos um grupo de jovens brasileiros seja elegível; a oportunidade não precisa atender a todos os jovens do Brasil.
+- Restrições de estado, cidade, escola, rede de ensino, série, idade ou outra característica não desqualificam a oportunidade quando o grupo resultante ainda contém jovens brasileiros. Por exemplo, estudantes de escolas cearenses do 8º ano ao 3º ano do ensino médio qualificam.
+- Use qualification.verdict "qualified" com citação literal que, isoladamente ou em conjunto, comprove a elegibilidade de algum grupo jovem e seu alcance ao Brasil ou a uma localidade brasileira. Se esses fatos estiverem em trechos diferentes, inclua ambos em qualification.evidence. Use "unqualified" somente quando a fonte mais confiável excluir todos os jovens brasileiros ou quando nenhum jovem puder participar. Use "uncertain" quando faltar prova ou houver conflito não resolvido.
+- Escreva qualification.reason em português brasileiro, mesmo quando as fontes estiverem em outro idioma.
+
+PLANO DE PESQUISA:
+${plan.map((topic) => `- ${topic.id}: ${topic.question}`).join('\n')}
+
+Responda SOMENTE com JSON cru:
+{"facts":[{"topic":"deadline_status","fact":"As inscrições foram prorrogadas.","quote":"Inscrições prorrogadas até 19/06/2026","source_url":"https://exemplo.org/edicao-2026"}],"qualification":{"verdict":"qualified","reason":"Aceita jovens de todos os países.","evidence":[{"quote":"Young people from all countries may apply","source_url":"https://exemplo.org/rules"}]},"source_assessments":[{"source_url":"https://exemplo.org/rules","authority":"official_rules_or_application","reason":"Regulamento da edição vigente"}],"gaps":[],"conflicts":[]}
+
+Oportunidade atual:
+${JSON.stringify({ title: opportunity.title, link: opportunity.link, deadline: opportunity.deadline, status: opportunity.status })}`;
+}
+
+export function normalizeResearchBrief(rawBrief, sources, plan = []) {
+  const allowedTopics = new Set(plan.map((topic) => topic.id));
+  const facts = (Array.isArray(rawBrief?.facts) ? rawBrief.facts : []).flatMap((rawFact) => {
+    const quote = String(rawFact?.quote || '').trim();
+    const sourceUrl = String(rawFact?.source_url || '').trim();
+    const source = sources.find((item) => sameSourceUrl(item.url, sourceUrl));
+    const fact = String(rawFact?.fact || '').trim();
+    const topic = String(rawFact?.topic || '').trim();
+    if (!fact || !quote || !source || !comparableEvidenceText(source.text).includes(comparableEvidenceText(quote))) return [];
+    return [{
+      topic: allowedTopics.has(topic) ? topic : 'current_cycle',
+      fact,
+      quote,
+      source_url: source.url,
+    }];
+  });
+  const cleanList = (value) => (Array.isArray(value) ? value : [])
+    .map((item) => String(item || '').trim()).filter(Boolean).slice(0, 12);
+  const qualification = normalizeQualification(rawBrief?.qualification, sources);
+  const modelAssessments = new Map((Array.isArray(rawBrief?.source_assessments) ? rawBrief.source_assessments : [])
+    .map((item) => [String(item?.source_url || ''), item]));
+  const sourceAssessments = sources.map((source) => {
+    const model = [...modelAssessments.entries()].find(([url]) => sameSourceUrl(url, source.url))?.[1] || {};
+    const authority = String(model.authority || source.trust?.authority || 'third_party_or_unverified');
+    const preliminaryRank = Number(source.trust?.trust_rank || 0);
+    const authorityRank = AUTHORITY_TRUST_RANK[authority] ?? preliminaryRank;
+    return {
+      source_url: source.url,
+      authority,
+      trust_rank: Math.min(preliminaryRank, authorityRank),
+      discovered_from: source.trust?.discovered_from || null,
+      reason: String(model.reason || '').trim(),
+    };
+  }).sort((a, b) => b.trust_rank - a.trust_rank);
+  return {
+    facts: facts.slice(0, 30), qualification, source_assessments: sourceAssessments,
+    gaps: cleanList(rawBrief?.gaps), conflicts: cleanList(rawBrief?.conflicts),
+  };
+}
+
+export function normalizeQualification(rawQualification, sources = []) {
+  const requested = String(rawQualification?.verdict || '').toLowerCase();
+  const rawEvidence = Array.isArray(rawQualification?.evidence) ? rawQualification.evidence : [];
+  const evidence = rawEvidence.flatMap((item) => {
+    const quote = String(item?.quote || '').trim();
+    const sourceUrl = String(item?.source_url || '').trim();
+    const source = sources.find((candidate) => sameSourceUrl(candidate.url, sourceUrl));
+    if (!quote || !source || !comparableEvidenceText(source.text).includes(comparableEvidenceText(quote))) return [];
+    return [{ quote, source_url: source.url, trust_rank: Number(source.trust?.trust_rank || 0) }];
+  }).sort((a, b) => b.trust_rank - a.trust_rank);
+  const combined = normalizedText(evidence.map((item) => item.quote).join(' '));
+  let verdict = QUALIFICATION_VERDICTS.has(requested) ? requested : 'uncertain';
+  if (!evidence.length) verdict = 'uncertain';
+  if (verdict === 'qualified' && !((BRAZIL_REACH_PATTERN.test(combined) || BRAZIL_LOCAL_REACH_PATTERN.test(combined))
+    && YOUTH_PARTICIPATION_PATTERN.test(combined)
+    && POSITIVE_PARTICIPATION_PATTERN.test(combined)
+    && !BRAZIL_EXCLUSION_PATTERN.test(combined))) verdict = 'uncertain';
+  if (verdict === 'unqualified' && !PARTICIPATION_EXCLUSION_PATTERN.test(combined)) verdict = 'uncertain';
+  const downgraded = verdict === 'uncertain' && requested !== 'uncertain';
+  return {
+    verdict,
+    reason: downgraded
+      ? 'As citações coletadas não comprovam que ao menos um grupo de jovens brasileiros pode participar.'
+      : String(rawQualification?.reason || (verdict === 'uncertain' ? 'As fontes não comprovam que jovens brasileiros podem participar.' : '')).trim(),
+    evidence,
+  };
+}
+
+export function qualificationCatalogPatch(qualification, opportunity = {}) {
+  const verdict = QUALIFICATION_VERDICTS.has(qualification?.verdict) ? qualification.verdict : 'uncertain';
+  // A research gap must not downgrade an existing catalog entry. Only affirmative
+  // evidence can qualify or unqualify; availability is handled from deadlines.
+  if (verdict === 'uncertain') return {};
+  const qualificationStatus = verdict === 'qualified' ? 'qualified' : 'unqualified';
+  const rawReason = String(qualification?.reason || '').trim();
+  const genericReason = 'As fontes indicam que jovens brasileiros não podem participar.';
+  const patch = {
+    qualification_status: qualificationStatus,
+    qualification_reason: verdict === 'qualified'
+      ? null
+      : (rawReason && isPortugueseCatalogValue('qualification_reason', rawReason) ? rawReason : genericReason),
+  };
+  if (verdict === 'unqualified') patch.status = 'Rascunho';
+  return patch;
+}
+
+export function qualificationAtomicSelection(fields = [], changes = {}) {
+  const selected = [...new Set(fields)];
+  if (!changes.qualification_status) return selected;
+  const decisionFields = ['qualification_status', 'qualification_reason'];
+  const touchesDecision = selected.some((field) => decisionFields.includes(field))
+    || (selected.includes('status') && ['pending', 'unqualified'].includes(changes.qualification_status?.after));
+  if (!touchesDecision) return selected;
+  return [...new Set([
+    ...selected,
+    ...decisionFields.filter((field) => changes[field]),
+    ...(changes.status ? ['status'] : []),
+  ])];
+}
+
+export async function researchOpportunityDossier({ url, opportunity = {}, leadSource = null }) {
+  const research = await fetchResearchSources(url, opportunity);
+  if (leadSource?.url && leadSource?.text
+    && !research.sources.some((source) => sameSourceUrl(source.url, leadSource.url))) {
+    research.sources.push(annotateResearchSource({
+      url: leadSource.url,
+      text: String(leadSource.text),
+      relation: leadSource.relation || 'Pista de origem',
+      depth: -1,
+    }, { primaryUrl: url, depth: -1 }));
+  }
+  const response = await callStructuredModel(
+    researchBriefPrompt(opportunity, research.plan),
+    `${sourcesForPrompt(research.sources)}\n\nRetorne o dossiê factual agora.`,
+    { maxTokens: 3072 },
+  );
+  const brief = normalizeResearchBrief(response.parsed, research.sources, research.plan);
+  research.sources = research.sources.map((source) => {
+    const assessment = brief.source_assessments.find((item) => sameSourceUrl(item.source_url, source.url));
+    return assessment
+      ? { ...source, trust: { ...source.trust, authority: assessment.authority, trust_rank: assessment.trust_rank } }
+      : source;
+  });
+  brief.qualification.evidence = brief.qualification.evidence
+    .map((item) => {
+      const assessment = brief.source_assessments.find((source) => sameSourceUrl(source.source_url, item.source_url));
+      return assessment ? { ...item, trust_rank: assessment.trust_rank } : item;
+    })
+    .sort((a, b) => b.trust_rank - a.trust_rank);
+  return {
+    research,
+    brief,
+    response,
+    metrics: addMetrics({ ...emptyMetrics(), pageFetches: research.pageFetches }, response.metrics),
+  };
+}
+
+function tagSlug(value) {
+  return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+}
+
+export function normalizeKeywordTags(value, allowedNames = []) {
+  const raw = Array.isArray(value) ? value : String(value || '').split(/[,;\n]/);
+  const allowed = new Map(allowedNames.map((name) => [normalizedText(name), String(name).trim()]));
+  const result = [];
+  for (const item of raw) {
+    const display = String(item || '').trim();
+    const slug = tagSlug(display);
+    if (!slug || TAG_EXCLUSIONS.has(slug)) continue;
+    if (/^(?:remot[oa]|online|virtual|presencial|hibrid[oa]|ingles|portugues|espanhol|frances|gratuit[oa]|gratis|pago|ensino-|fundamental|gap-year|programa-academico|olimpiada-cientifica|competicao|mentoria|bolsa-de-estudo|programa-de-intercambio|mun|estagio)(?:-|s$|$)/.test(slug)) continue;
+    if (/^(?:jovens?|estudantes?|meninas?|mulheres?|negros?|indigenas?|lgbt|baixa-renda)$/.test(slug)) continue;
+    const canonical = allowed.size ? allowed.get(normalizedText(display)) : display;
+    if (!canonical || result.some((existing) => normalizedText(existing) === normalizedText(canonical))) continue;
+    result.push(canonical);
+    if (result.length === 8) break;
+  }
+  return result;
+}
+
+export function normalizeLocationForCatalog(value) {
+  const raw = String(value || '').trim();
+  const semantic = normalizedText(raw);
+  const remote = /\b(?:remot[oa]|online|virtual|a distancia)\b/.test(semantic);
+  const physical = /\b(?:presencial|hibrid[oa]|sede|campus|cidade|estado|viagem|final presencial|atividades presenciais)\b/.test(semantic);
+  return remote && !physical ? 'Remoto' : raw;
 }
 
 function normalizeUpdate(field, value) {
   if (value == null) return undefined;
   if (ARRAY_FIELDS.has(field)) {
     if (!Array.isArray(value)) return undefined;
-    const normalized = value.map((item) => String(item).trim()).filter(Boolean);
+    const normalized = field === 'keywords'
+      ? normalizeKeywordTags(value)
+      : value.map((item) => String(item).trim()).filter(Boolean);
     if (CONTROLLED_VALUES[field] && normalized.some((item) => !CONTROLLED_VALUES[field].has(item))) return undefined;
     return normalized;
   }
@@ -693,7 +1264,10 @@ function normalizeUpdate(field, value) {
   if (LINE_LIST_FIELDS.has(field)) {
     return normalizeLineList(value) || undefined;
   }
-  const normalized = field === 'deadline' ? normalizeDeadlineOutput(value) : value.trim();
+  const normalized = field === 'deadline'
+    ? normalizeDeadlineOutput(value)
+    : field === 'location' ? normalizeLocationForCatalog(value) : value.trim();
+  if (field === 'deadline' && !isAcceptableDeadlineOutput(normalized)) return undefined;
   if (CONTROLLED_VALUES[field] && !CONTROLLED_VALUES[field].has(normalized)) return undefined;
   return normalized;
 }
@@ -706,12 +1280,51 @@ export function normalizeLineList(value) {
     .join('\n');
 }
 
-export function resolveProposalPatch(fields, proposed, requestedEdits = {}) {
+export function normalizeEligibilityForCatalog(value, language, opportunity = {}) {
+  const opportunityTitle = normalizedText(opportunity.title || opportunity.titulo);
+  const eligibilityText = normalizedText(value);
+  const isCamaraMirimSchool = opportunityTitle.includes('camara mirim')
+    && /5\s*[ºo°]?\s*(?:ao|a|ate|-)\s*9\s*[ºo°]?\s*ano\s+do\s+ensino\s+fundamental/i.test(eligibilityText);
+  if (isCamaraMirimSchool) return 'Estar entre o 5º e 9º ano do Ensino Fundamental';
+  const englishIsSeparate = normalizedText(language).includes('ingles');
+  const parentheticalLinesCollapsed = String(value || '').replace(/\([^)]*\)/gs, (match) => match.replace(/\s*\r?\n\s*/g, ' '));
+  const items = parentheticalLinesCollapsed.replace(/\(\s*autor(?:a)?\s+[\u00fau]nic[oa]\s*\)/gi, '; Ser autor \u00fanico')
+    .split(/\r?\n|;\s*|(?<=[.!?])\s+/)
+    .map((item) => item.replace(/^\s*(?:[-*â€¢]|\d+[.)])\s*/, '').trim())
+    .map((item) => /^Qualquer\s+estudante/i.test(item)
+      ? item.replace(/^Qualquer\s+estudante/i, 'Ser estudante').replace(/\s+do\s+mundo\b/i, '').trim()
+      : item)
+    .map((item) => item.replace(/,?\s*brasileiros?\s+ou\s+estrangeiros?/i, '').replace(/\s+,/g, ',').trim())
+    .flatMap((item) => item.split(/,\s+e\s+(?=n[aã]o\s+|ter\s+|estar\s+)/i))
+    .map((item) => {
+      const semanticItem = normalizedText(item);
+      if (/^(?:ser|poder ser|aceitar)\s+(?:de\s+)?qualquer\s+(?:lugar|pais|parte)\s+do\s+mundo\.?$/i.test(semanticItem)) return '';
+      if (/^(?:estudantes?|candidat[oa]s?|participantes?)?\s*internacionais?.{0,50}(?:elegiveis?|podem participar|podem se inscrever)/i.test(semanticItem)) return '';
+      if (/^(?:presencial|remot[oa]|online|virtual|idioma|em ingles|atividades? presenciais?)/i.test(semanticItem)) return '';
+      if (/^(?:inscricoes?|candidaturas?|prazo|deadline|preencher|enviar|anexar|pagar|taxa|custo|valor)\b/i.test(semanticItem)) return '';
+      if (/(?:palavras?|turabian|endnotes?|bibliografia)/i.test(semanticItem)) return '';
+      if (/^nao\s+publicado\s+antes\s+em\s+escola\s+secundaria$/i.test(semanticItem)) return '';
+      if (/^autor(?:a)?\s+unic[oa]$/i.test(semanticItem)) return 'Ser autor \u00fanico';
+      if (!englishIsSeparate) return item;
+      if (/^(?:saber|falar|dominar|ter\s+fluencia\s+em)\s+ingles\.?$/i.test(normalizedText(item))) return '';
+      if (/^(?:escrever|redigir|produzir|enviar).{0,50}\bem\s+ingles\.?$/i.test(normalizedText(item))) return '';
+      if (/^(?:o\s+)?(?:trabalho|ensaio|texto)\s+(?:deve\s+ser\s+)?em\s+ingles\.?$/i.test(normalizedText(item))) return '';
+      const publicationRule = item.match(/^(?:o\s+)?(?:trabalho|ensaio|texto)\s+(?:deve\s+ser\s+)?em\s+ingl[eê]s\s+e\s+n[aã]o\s+(?:ter\s+sido\s+)?publicado\s*(.*)$/i);
+      if (publicationRule) return `Não ter o trabalho publicado${publicationRule[1] ? ` ${publicationRule[1]}` : ''}`.trim();
+      return item;
+    })
+    .filter(Boolean);
+  return normalizeLineList(items.join('\n'));
+}
+
+export function resolveProposalPatch(fields, proposed, requestedEdits = {}, allowedTags = []) {
   const patch = {};
   const editorFields = [];
   for (const field of fields) {
     if (!Object.prototype.hasOwnProperty.call(requestedEdits, field)) {
-      patch[field] = field === 'deadline' ? normalizeDeadlineOutput(proposed[field]) : proposed[field];
+      patch[field] = field === 'deadline'
+        ? (proposed[field] == null ? null : normalizeDeadlineOutput(proposed[field]))
+        : proposed[field];
       continue;
     }
     let raw = requestedEdits[field];
@@ -723,7 +1336,7 @@ export function resolveProposalPatch(fields, proposed, requestedEdits = {}) {
       editorFields.push(field);
       continue;
     }
-    const normalized = normalizeUpdate(field, raw);
+    const normalized = field === 'keywords' ? normalizeKeywordTags(raw, allowedTags) : normalizeUpdate(field, raw);
     if (normalized === undefined || (REQUIRED_TEXT_FIELDS.has(field) && !String(normalized).trim())) {
       throw Object.assign(new Error(`O valor editado de ${field} é inválido.`), { statusCode: 400 });
     }
@@ -737,7 +1350,35 @@ export function resolveProposalPatch(fields, proposed, requestedEdits = {}) {
 }
 
 export function normalizeDeadlineOutput(value) {
-  return String(value || '').trim().replace(/\b0([1-9])(?=\s+de\s+(?:janeiro|fevereiro|março|marco|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro)\b)/gi, '$1');
+  const raw = String(value || '').trim();
+  const parts = parseDateParts(raw);
+  if (parts) return `${parts.day} de ${PORTUGUESE_MONTH_NAMES[parts.month]} de ${parts.year}`;
+  return raw.replace(/\b0([1-9])(?=\s+de\s+(?:janeiro|fevereiro|março|marco|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro)\b)/gi, '$1');
+}
+
+const COMPLETE_DEADLINE_PATTERN = /^(\d{1,2})\s+de\s+(janeiro|fevereiro|março|marco|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro)\s+de\s+(20\d{2})$/i;
+const ROLLING_DEADLINE_VALUE_PATTERN = /^(?:continuo|rolling|inscricoes?\s+continuas?|prazo\s+continuo|fluxo\s+continuo)$/i;
+
+export function isCompleteDeadlineOutput(value) {
+  const normalized = normalizeDeadlineOutput(value);
+  const match = normalized.match(COMPLETE_DEADLINE_PATTERN);
+  if (!match) return false;
+  const parts = parseDateParts(normalized);
+  if (!parts) return false;
+  const candidate = new Date(Date.UTC(parts.year, parts.month - 1, parts.day));
+  return candidate.getUTCFullYear() === parts.year
+    && candidate.getUTCMonth() === parts.month - 1
+    && candidate.getUTCDate() === parts.day;
+}
+
+export function isAcceptableDeadlineOutput(value) {
+  const normalized = normalizeDeadlineOutput(value);
+  return isCompleteDeadlineOutput(normalized) || ROLLING_DEADLINE_VALUE_PATTERN.test(normalizedText(normalized));
+}
+
+export function vagueDeadlineChange(value) {
+  if (value == null || value === '' || isAcceptableDeadlineOutput(value)) return null;
+  return { before: value, after: null };
 }
 
 export function isPortugueseCatalogValue(field, value) {
@@ -766,17 +1407,76 @@ function normalizedText(value) {
   return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
 }
 
+function comparableEvidenceText(value) {
+  return normalizedText(decodeHtmlEntities(value)).replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
 const MONTH_NUMBERS = {
   january: 1, janeiro: 1, february: 2, fevereiro: 2, march: 3, marco: 3,
   april: 4, abril: 4, may: 5, maio: 5, june: 6, junho: 6, july: 7, julho: 7,
   august: 8, agosto: 8, september: 9, setembro: 9, october: 10, outubro: 10,
   november: 11, novembro: 11, december: 12, dezembro: 12,
 };
+const PORTUGUESE_MONTH_NAMES = {
+  1: 'janeiro', 2: 'fevereiro', 3: 'março', 4: 'abril', 5: 'maio', 6: 'junho',
+  7: 'julho', 8: 'agosto', 9: 'setembro', 10: 'outubro', 11: 'novembro', 12: 'dezembro',
+};
 const MONTH_PATTERN = Object.keys(MONTH_NUMBERS).join('|');
+
+function fullDateMentions(value) {
+  const text = normalizedText(value);
+  const mentions = [];
+  const patterns = [
+    { regex: new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+(?:de\\s+)?(${MONTH_PATTERN})\\s*(?:de|,)?\\s*(20\\d{2})\\b`, 'g'), order: 'day-first' },
+    { regex: new RegExp(`\\b(${MONTH_PATTERN})\\s+(\\d{1,2})(?:st|nd|rd|th)?(?:,)?\\s+(20\\d{2})\\b`, 'g'), order: 'month-first' },
+    { regex: /\b(\d{1,2})[\/.\-](\d{1,2})[\/.\-](20\d{2})\b/g, order: 'numeric-day-first' },
+  ];
+  for (const { regex, order } of patterns) {
+    let match;
+    while ((match = regex.exec(text))) {
+      const parts = order === 'day-first'
+        ? { day: Number(match[1]), month: MONTH_NUMBERS[match[2]], year: Number(match[3]) }
+        : order === 'month-first'
+          ? { day: Number(match[2]), month: MONTH_NUMBERS[match[1]], year: Number(match[3]) }
+          : { day: Number(match[1]), month: Number(match[2]), year: Number(match[3]) };
+      mentions.push({ parts, index: match.index });
+    }
+  }
+  return mentions.filter(({ parts }) => {
+    const candidate = new Date(Date.UTC(parts.year, parts.month - 1, parts.day));
+    return candidate.getUTCFullYear() === parts.year
+      && candidate.getUTCMonth() === parts.month - 1
+      && candidate.getUTCDate() === parts.day;
+  });
+}
+
+function dayMonthMentions(value) {
+  const text = normalizedText(value);
+  const mentions = [];
+  const patterns = [
+    { regex: new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+(?:de\\s+)?(${MONTH_PATTERN})\\b`, 'g'), order: 'day-first' },
+    { regex: new RegExp(`\\b(${MONTH_PATTERN})\\s+(\\d{1,2})(?:st|nd|rd|th)?\\b`, 'g'), order: 'month-first' },
+    { regex: /\b(\d{1,2})[\/.\-](\d{1,2})(?![\/.\-]\d{2,4})\b/g, order: 'numeric-day-first' },
+  ];
+  for (const { regex, order } of patterns) {
+    let match;
+    while ((match = regex.exec(text))) {
+      const parts = order === 'day-first'
+        ? { day: Number(match[1]), month: MONTH_NUMBERS[match[2]] }
+        : order === 'month-first'
+          ? { day: Number(match[2]), month: MONTH_NUMBERS[match[1]] }
+          : { day: Number(match[1]), month: Number(match[2]) };
+      mentions.push({ parts, index: match.index });
+    }
+  }
+  return mentions;
+}
 
 export function parseDateParts(value) {
   const text = normalizedText(value);
-  let match = text.match(new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+(?:de\\s+)?(${MONTH_PATTERN})\\s*(?:de|,)?\\s*(\\d{4})\\b`));
+  let match = text.match(/\b(\d{1,2})[\/.\-](\d{1,2})[\/.\-](20\d{2})\b/);
+  if (match) return { day: Number(match[1]), month: Number(match[2]), year: Number(match[3]) };
+  match = text.match(new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+(?:de\\s+)?(${MONTH_PATTERN})\\s*(?:de|,)?\\s*(\\d{4})\\b`));
   if (match) return { day: Number(match[1]), month: MONTH_NUMBERS[match[2]], year: Number(match[3]) };
   match = text.match(new RegExp(`\\b(${MONTH_PATTERN})\\s+(\\d{1,2})(?:st|nd|rd|th)?(?:,)?\\s+(\\d{4})\\b`));
   if (match) return { day: Number(match[2]), month: MONTH_NUMBERS[match[1]], year: Number(match[3]) };
@@ -801,8 +1501,306 @@ export function expiredStatusChange(deadline, currentStatus, today = new Date())
   return { before: currentStatus ?? null, after: 'Encerrada' };
 }
 
-const DEADLINE_EVIDENCE_PATTERN = /\b(?:deadline|applications?\s+(?:close|closes|due)|registration\s+(?:close|closes|ends|deadline)|submissions?\s+(?:close|closes|due)|submit(?:ted)?\s+by|register\s+by|due\s+(?:by|on)|inscri(?:cao|coes).{0,30}(?:ate|encerra|encerram|termina|terminam)|encerramento\s+das\s+inscricoes|prazo|data\s+limite)\b/;
+const DEADLINE_EVIDENCE_PATTERN = /\b(?:application\s+deadline|deadline\s+(?:for\s+)?(?:applications?|registration|submissions?)|applications?\s+(?:close|closes|due)|registration\s+(?:close|closes|ends|deadline)|submissions?\s+(?:close|closes|due)|submit(?:ted)?\s+by|register\s+by|due\s+(?:by|on)|(?:periodo\s+(?:para|de)\s+)?inscri(?:cao|coes).{0,90}(?:ate|encerra|encerram|termina|terminam|prazo|periodo|de\s+\d{1,4})|prazo.{0,30}inscri(?:cao|coes)|(?:encerramento|termino)\s+das\s+inscricoes|data\s+limite.{0,30}(?:inscri|candidat|projeto)|formularios?.{0,50}(?:submetid|enviad).{0,20}ate)\b/;
 const ROLLING_EVIDENCE_PATTERN = /\b(?:rolling|open\s+year[- ]round|accepted\s+throughout|inscricoes\s+continuas|fluxo\s+continuo)\b/;
+const REGISTRATION_RANGE_PATTERN = /\binscri(?:cao|coes)\b[^.!?;]{0,35}?(\d{1,2})[\/.\-](\d{1,2})(?:[\/.\-](20\d{2}))?\s*(?:a|ate|ao|[-\u2013\u2014])\s*(\d{1,2})[\/.\-](\d{1,2})(?:[\/.\-](20\d{2}))?/g;
+const REGISTRATION_WRITTEN_RANGE_PATTERN = new RegExp(`\\b(?:periodo\\s+(?:para|de)\\s+)?inscri(?:cao|coes)\\b[^.!?;]{0,140}?\\bde\\s+(\\d{1,2})(?:st|nd|rd|th)?\\s+(?:de\\s+)?(${MONTH_PATTERN})\\s*(?:de|,)?\\s*(20\\d{2})?\\s*(?:a|ate|ao|[-\\u2013\\u2014])\\s*(\\d{1,2})(?:st|nd|rd|th)?\\s+(?:de\\s+)?(${MONTH_PATTERN})\\s*(?:de|,)?\\s*(20\\d{2})?\\b`, 'g');
+const REVERSED_REGISTRATION_RANGE_PATTERN = /(\d{1,2})[\/.\-](\d{1,2})(?:[\/.\-](20\d{2}))?\s*(?:a|ate|ao|[-\u2013\u2014])\s*(\d{1,2})[\/.\-](\d{1,2})(?:[\/.\-](20\d{2}))?[^.!?;]{0,180}\b(?:periodo[^.!?;]{0,120})?inscri(?:cao|coes)\b/g;
+const DATE_BEFORE_DEADLINE_LABEL_PATTERN = /(\d{1,2})[\/.\-](\d{1,2})(?:[\/.\-](20\d{2}))?\s*(?:[-\u2013\u2014:]\s*)?(?:(?:termino|encerramento|fim|prazo final)[^.!?;]{0,55}inscri(?:cao|coes)|(?:application|registration)\s+deadline)\b/g;
+const CLOSED_APPLICATION_PATTERN = /\b(?:applications?|registration|submissions?|inscri(?:ção|ções|cao|coes))\b[^.!?]{0,100}\b(?:closed|encerrad[ao]s?|finalizad[ao]s?|no longer\s+(?:open|accepted))\b/i;
+
+function sourceDeadlineWindows(source) {
+  const text = String(source?.text || '');
+  const normalized = normalizedText(text);
+  const pattern = new RegExp(DEADLINE_EVIDENCE_PATTERN.source, 'g');
+  const windows = [];
+  let match;
+  while ((match = pattern.exec(normalized))) {
+    const start = Math.max(0, match.index - 140);
+    const end = Math.min(text.length, match.index + match[0].length + 180);
+    windows.push(text.slice(start, end).trim());
+  }
+  return windows;
+}
+
+function deadlineLinkedMentions(value, mentions) {
+  const text = normalizedText(value);
+  const markerPattern = new RegExp(DEADLINE_EVIDENCE_PATTERN.source, 'g');
+  const linked = [];
+  let marker;
+  while ((marker = markerPattern.exec(text))) {
+    const markerEnd = marker.index + marker[0].length;
+    const ranked = mentions
+      .map((mention) => {
+        const between = text.slice(Math.min(mention.index, markerEnd), Math.max(mention.index, markerEnd));
+        return {
+          ...mention,
+          crossesBoundary: /[.!?;]/.test(between),
+          distance: Math.min(Math.abs(mention.index - marker.index), Math.abs(mention.index - markerEnd))
+            + (mention.index < marker.index ? 80 : 0),
+        };
+      })
+      .filter((mention) => !mention.crossesBoundary)
+      .filter((mention) => mention.distance <= 160)
+      .sort((a, b) => a.distance - b.distance);
+    if (ranked[0]) linked.push(ranked[0]);
+  }
+  return linked;
+}
+
+function evidenceDateMatches(proposedValue, quote, sourceText = quote) {
+  const proposedDate = parseDateParts(proposedValue);
+  if (!proposedDate) return false;
+  const rangePattern = new RegExp(REGISTRATION_RANGE_PATTERN.source);
+  const range = rangePattern.exec(normalizedText(quote));
+  if (range) {
+    const rangeYear = Number(range[6] || range[3]) || contextualYearForQuote(quote, sourceText);
+    if (proposedDate.day === Number(range[4]) && proposedDate.month === Number(range[5]) && proposedDate.year === rangeYear) {
+      return true;
+    }
+  }
+  const writtenRange = new RegExp(REGISTRATION_WRITTEN_RANGE_PATTERN.source).exec(normalizedText(quote));
+  if (writtenRange) {
+    const rangeYear = Number(writtenRange[6] || writtenRange[3]) || contextualYearForQuote(quote, sourceText);
+    if (proposedDate.day === Number(writtenRange[4]) && proposedDate.month === MONTH_NUMBERS[writtenRange[5]] && proposedDate.year === rangeYear) {
+      return true;
+    }
+  }
+  const reversedRange = new RegExp(REVERSED_REGISTRATION_RANGE_PATTERN.source).exec(normalizedText(quote));
+  if (reversedRange) {
+    const rangeYear = Number(reversedRange[6] || reversedRange[3]) || contextualYearForQuote(quote, sourceText);
+    if (proposedDate.day === Number(reversedRange[4]) && proposedDate.month === Number(reversedRange[5]) && proposedDate.year === rangeYear) {
+      return true;
+    }
+  }
+  const dateBeforeLabel = new RegExp(DATE_BEFORE_DEADLINE_LABEL_PATTERN.source).exec(normalizedText(quote));
+  if (dateBeforeLabel) {
+    const year = Number(dateBeforeLabel[3]) || contextualYearForQuote(quote, sourceText);
+    if (proposedDate.day === Number(dateBeforeLabel[1]) && proposedDate.month === Number(dateBeforeLabel[2]) && proposedDate.year === year) {
+      return true;
+    }
+  }
+  const linkedFullDates = deadlineLinkedMentions(quote, fullDateMentions(quote));
+  if (linkedFullDates.some((mention) => equalValue(mention.parts, proposedDate))) return true;
+  const linkedPairs = deadlineLinkedMentions(quote, dayMonthMentions(quote));
+  const pairMatches = linkedPairs.some(({ parts }) => parts.day === proposedDate.day && parts.month === proposedDate.month);
+  if (!pairMatches) return false;
+  const normalizedSource = normalizedText(sourceText);
+  const normalizedQuote = normalizedText(quote);
+  const quoteIndex = normalizedSource.indexOf(normalizedQuote);
+  const context = quoteIndex >= 0
+    ? normalizedSource.slice(Math.max(0, quoteIndex - 240), quoteIndex + normalizedQuote.length + 240)
+    : normalizedSource;
+  return new RegExp(`\\b${proposedDate.year}\\b`).test(context);
+}
+
+function validDateParts(parts) {
+  if (!parts?.day || !parts?.month || !parts?.year) return false;
+  const candidate = new Date(Date.UTC(parts.year, parts.month - 1, parts.day));
+  return candidate.getUTCFullYear() === parts.year
+    && candidate.getUTCMonth() === parts.month - 1
+    && candidate.getUTCDate() === parts.day;
+}
+
+function contextualYearForQuote(quote, sourceText, opportunity = {}) {
+  const quoteYears = [...normalizedText(quote).matchAll(/\b(20\d{2})\b/g)].map((match) => Number(match[1]));
+  if (quoteYears.length) return quoteYears[0];
+  const normalizedSource = normalizedText(sourceText);
+  const normalizedQuote = normalizedText(quote);
+  const quoteIndex = normalizedSource.indexOf(normalizedQuote);
+  if (quoteIndex >= 0) {
+    const contextStart = Math.max(0, quoteIndex - 260);
+    const context = normalizedSource.slice(contextStart, quoteIndex + normalizedQuote.length + 260);
+    const nearbyYears = [...context.matchAll(/\b(20\d{2})\b/g)]
+      .map((match) => ({ year: Number(match[1]), distance: Math.abs(contextStart + match.index - quoteIndex) }))
+      .sort((a, b) => a.distance - b.distance);
+    if (nearbyYears[0]) return nearbyYears[0].year;
+  }
+  const opportunityYear = String(opportunity.title || '').match(/\b(20\d{2})\b/)?.[1];
+  if (opportunityYear) return Number(opportunityYear);
+  const sourceYears = [...new Set([...normalizedSource.matchAll(/\b(20\d{2})\b/g)].map((match) => Number(match[1])))];
+  return sourceYears.length === 1 ? sourceYears[0] : null;
+}
+
+function deadlineCandidatesFromSources(sources, opportunity = {}) {
+  const candidates = [];
+  const addCandidate = (source, quote, parts) => {
+    if (!validDateParts(parts)) return;
+    const value = `${parts.day} de ${PORTUGUESE_MONTH_NAMES[parts.month]} de ${parts.year}`;
+    candidates.push({ value, quote, source_url: source.url, kind: 'application_deadline', parts });
+  };
+  for (const source of sources || []) {
+    for (const quote of sourceDeadlineWindows(source)) {
+      const normalizedQuote = normalizedText(quote);
+      if (new RegExp(REGISTRATION_RANGE_PATTERN.source).test(normalizedQuote)
+        || new RegExp(REGISTRATION_WRITTEN_RANGE_PATTERN.source).test(normalizedQuote)
+        || new RegExp(REVERSED_REGISTRATION_RANGE_PATTERN.source).test(normalizedQuote)
+        || new RegExp(DATE_BEFORE_DEADLINE_LABEL_PATTERN.source).test(normalizedQuote)) continue;
+      for (const { parts } of deadlineLinkedMentions(quote, fullDateMentions(quote))) {
+        if (evidenceDateMatches(`${parts.day} de ${PORTUGUESE_MONTH_NAMES[parts.month]} de ${parts.year}`, quote, source.text)) {
+          addCandidate(source, quote, parts);
+        }
+      }
+      for (const { parts } of deadlineLinkedMentions(quote, dayMonthMentions(quote))) {
+        const year = contextualYearForQuote(quote, source.text, opportunity);
+        if (year) addCandidate(source, quote, { ...parts, year });
+      }
+    }
+    const normalizedSource = normalizedText(source.text);
+    const rangePattern = new RegExp(REGISTRATION_RANGE_PATTERN.source, 'g');
+    let range;
+    while ((range = rangePattern.exec(normalizedSource))) {
+      const quote = normalizedSource.slice(Math.max(0, range.index - 80), Math.min(normalizedSource.length, range.index + range[0].length + 80));
+      const year = Number(range[6] || range[3]) || contextualYearForQuote(quote, source.text, opportunity);
+      if (year) addCandidate(source, quote, { day: Number(range[4]), month: Number(range[5]), year });
+    }
+    const writtenRangePattern = new RegExp(REGISTRATION_WRITTEN_RANGE_PATTERN.source, 'g');
+    while ((range = writtenRangePattern.exec(normalizedSource))) {
+      const quote = normalizedSource.slice(Math.max(0, range.index - 80), Math.min(normalizedSource.length, range.index + range[0].length + 80));
+      const year = Number(range[6] || range[3]) || contextualYearForQuote(quote, source.text, opportunity);
+      if (year) addCandidate(source, quote, { day: Number(range[4]), month: MONTH_NUMBERS[range[5]], year });
+    }
+    const reversedRangePattern = new RegExp(REVERSED_REGISTRATION_RANGE_PATTERN.source, 'g');
+    while ((range = reversedRangePattern.exec(normalizedSource))) {
+      const quote = normalizedSource.slice(Math.max(0, range.index - 80), Math.min(normalizedSource.length, range.index + range[0].length + 80));
+      const year = Number(range[6] || range[3]) || contextualYearForQuote(quote, source.text, opportunity);
+      if (year) addCandidate(source, quote, { day: Number(range[4]), month: Number(range[5]), year });
+    }
+    const dateBeforeLabelPattern = new RegExp(DATE_BEFORE_DEADLINE_LABEL_PATTERN.source, 'g');
+    while ((range = dateBeforeLabelPattern.exec(normalizedSource))) {
+      const quote = normalizedSource.slice(Math.max(0, range.index - 80), Math.min(normalizedSource.length, range.index + range[0].length + 120));
+      const year = Number(range[3]) || contextualYearForQuote(quote, source.text, opportunity);
+      if (year) addCandidate(source, quote, { day: Number(range[1]), month: Number(range[2]), year });
+    }
+  }
+  return [...new Map(candidates.map((candidate) => [`${candidate.source_url}|${candidate.value}`, candidate])).values()];
+}
+
+export function findUnambiguousDeadlineEvidence(sources) {
+  const candidates = deadlineCandidatesFromSources(sources);
+  const uniqueValues = [...new Set(candidates.map((candidate) => candidate.value))];
+  if (uniqueValues.length !== 1) return null;
+  const { parts: _parts, ...evidence } = candidates.find((candidate) => candidate.value === uniqueValues[0]);
+  return evidence;
+}
+
+export function findRelevantDeadlineEvidence(sources, today = new Date(), opportunity = {}) {
+  const candidates = deadlineCandidatesFromSources(sources, opportunity);
+  const unique = [...new Map(candidates.map((candidate) => [candidate.value, candidate])).values()];
+  const current = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
+  const future = unique
+    .filter(({ parts }) => Date.UTC(parts.year, parts.month - 1, parts.day) >= current)
+    .sort((a, b) => Date.UTC(a.parts.year, a.parts.month - 1, a.parts.day) - Date.UTC(b.parts.year, b.parts.month - 1, b.parts.day));
+  const chosen = future[0] || unique.sort((a, b) => Date.UTC(b.parts.year, b.parts.month - 1, b.parts.day) - Date.UTC(a.parts.year, a.parts.month - 1, a.parts.day))[0];
+  if (!chosen) return null;
+  const { parts: _parts, ...evidence } = chosen;
+  return evidence;
+}
+
+export function findRollingDeadlineEvidence(sources) {
+  for (const source of sources || []) {
+    const normalizedSource = normalizedText(source.text);
+    const match = normalizedSource.match(ROLLING_EVIDENCE_PATTERN);
+    if (!match) continue;
+    const sentenceStart = Math.max(normalizedSource.lastIndexOf('.', match.index) + 1, match.index - 120);
+    const nextPeriod = normalizedSource.indexOf('.', match.index + match[0].length);
+    const sentenceEnd = nextPeriod >= 0 ? nextPeriod + 1 : Math.min(normalizedSource.length, match.index + match[0].length + 120);
+    return {
+      value: 'Inscrições contínuas',
+      quote: normalizedSource.slice(sentenceStart, sentenceEnd).trim(),
+      source_url: source.url,
+      kind: 'rolling_deadline',
+    };
+  }
+  return null;
+}
+
+export function findExplicitClosedApplications(sources, opportunity = {}) {
+  const opportunityYears = new Set(String(opportunity.title || '').match(/\b20\d{2}\b/g) || []);
+  for (const source of sources || []) {
+    const match = String(source.text || '').match(CLOSED_APPLICATION_PATTERN);
+    if (!match) continue;
+    const quoteYears = new Set(match[0].match(/\b20\d{2}\b/g) || []);
+    if (opportunityYears.size === 1 && quoteYears.size === 1 && [...opportunityYears][0] !== [...quoteYears][0]) continue;
+    return { quote: match[0].trim(), source_url: source.url, kind: 'closed_applications' };
+  }
+  return null;
+}
+
+function findGeneralParticipationEvidence(sources) {
+  for (const source of sources || []) {
+    const sentences = String(source.text || '').split(/(?<=[.!?])\s+/);
+    const quote = sentences.find((sentence) => /\b(?:qualquer\s+estudante|podem\s+participar|abert[ao]\s+a\s+(?:alunos|estudantes)|students?.{0,120}\beligible)\b/.test(normalizedText(sentence)));
+    if (quote) return { quote: quote.trim().slice(0, 500), source_url: source.url, kind: 'general_participation' };
+  }
+  return null;
+}
+
+export function findEligibilityEvidence(sources, proposedValue = '') {
+  const desiredNumbers = String(proposedValue).match(/\b\d{1,2}\b/g) || [];
+  for (const source of sources || []) {
+    const sentences = String(source.text || '').split(/(?<=[.!?])\s+/);
+    const candidates = sentences
+      .map((sentence, index) => ({ sentence, index, text: normalizedText(sentence) }))
+      .filter(({ text }) => /\b(?:student|estudante|author|autor|professor|educador|eligible|eligibility|matriculad|ensino\s+fundamental|secondary\s+school|college|university)\b/.test(text))
+      .sort((left, right) => {
+        const score = ({ text }) => desiredNumbers.filter((number) => new RegExp('\\b' + number + '\\b').test(text)).length;
+        return score(right) - score(left);
+      });
+    const index = candidates[0]?.index ?? -1;
+    if (index >= 0) {
+      return {
+        quote: sentences.slice(index, index + 3).join(' ').trim().slice(0, 800),
+        source_url: source.url,
+        kind: 'eligibility_cleanup',
+      };
+    }
+  }
+  return null;
+}
+
+export function findProcessEvidence(sources) {
+  for (const source of sources || []) {
+    const sentences = String(source.text || '').split(/(?<=[.!?])\s+/);
+    const index = sentences.findIndex((sentence) => /\b(?:inscri|candidat|application|apply|register|registration|submit|submission|formulario|cadastre|cadastro)\b/.test(normalizedText(sentence)));
+    if (index >= 0) {
+      return {
+        quote: sentences.slice(index, index + 2).join(' ').trim().slice(0, 800),
+        source_url: source.url,
+        kind: 'process_evidence_recovered',
+      };
+    }
+  }
+  return null;
+}
+
+function findWritingCompetitionEvidence(sources) {
+  for (const source of sources || []) {
+    const sentences = String(source.text || '').split(/(?<=[.!?])\s+/);
+    const quote = sentences.find((sentence) => /\b(?:essay|essays|ensaio|ensaios|writing|redacao)\b/.test(normalizedText(sentence)));
+    if (quote) return { quote: quote.trim().slice(0, 500), source_url: source.url, kind: 'writing_competition' };
+  }
+  return null;
+}
+
+function findOfficialApplicationSource(sources, currentUrl) {
+  let current;
+  try { current = new URL(currentUrl); } catch { return null; }
+  if (!/(?:page-\d+|prize|award|premio|arquivo|archive)/i.test(current.pathname)) return null;
+  return (sources || [])
+    .filter((source) => {
+      try {
+        const target = new URL(source.url);
+        return comparableHost(target.hostname) === comparableHost(current.hostname)
+          && /\b(?:submit|submission|apply|application|inscri)/i.test(`${source.relation} ${target.pathname}`);
+      } catch { return false; }
+    })
+    .sort((left, right) => {
+      const leftExact = /\/submit\/?$/i.test(new URL(left.url).pathname) ? 1 : 0;
+      const rightExact = /\/submit\/?$/i.test(new URL(right.url).pathname) ? 1 : 0;
+      return rightExact - leftExact || left.url.length - right.url.length;
+    })[0] || null;
+}
 
 function sameSourceUrl(a, b) {
   try {
@@ -827,7 +1825,7 @@ export function validateFieldEvidence(field, proposedValue, rawEvidence, sources
   const sourceUrl = String(rawEvidence.source_url || '').trim();
   const source = sources.find((item) => sameSourceUrl(item.url, sourceUrl));
   if (!quote || !source) return { valid: false, reason: 'citação ou URL não corresponde às fontes lidas' };
-  if (!normalizedText(source.text).includes(normalizedText(quote))) {
+  if (!comparableEvidenceText(source.text).includes(comparableEvidenceText(quote))) {
     return { valid: false, reason: 'a citação não foi encontrada literalmente na fonte' };
   }
   const evidence = {
@@ -836,64 +1834,125 @@ export function validateFieldEvidence(field, proposedValue, rawEvidence, sources
     kind: String(rawEvidence.kind || 'field_evidence'),
     summary_pt: evidenceSummary(field, proposedValue),
   };
+  const semanticQuote = normalizedText(quote);
+  if (field === 'language' && !/\b(?:idioma|language|portugues|english|ingles|espanhol|spanish|frances|french)\b/.test(semanticQuote)) {
+    return { valid: false, reason: 'a citaÃ§Ã£o nÃ£o informa o idioma' };
+  }
+  if (field === 'process' && !/\b(?:inscri|candidat|application|apply|register|registration|submit|submission|formulario|cadastre|cadastro|pagamento|payment)\b/.test(semanticQuote)) {
+    return { valid: false, reason: 'a citaÃ§Ã£o nÃ£o comprova o processo de inscriÃ§Ã£o' };
+  }
+  if (field === 'eligibility' && !/\b(?:student|estudante|author|autor|eligible|eligibility|elegivel|matriculad|idade|school|university|college|residencia|resident)\b/.test(semanticQuote)) {
+    return { valid: false, reason: 'a citaÃ§Ã£o nÃ£o comprova critÃ©rios de elegibilidade' };
+  }
   if (field !== 'deadline') return { valid: true, evidence };
 
   const proposedText = normalizedText(proposedValue);
   const quoteText = normalizedText(quote);
-  const rolling = /\b(?:continuo|rolling)\b/.test(proposedText);
+  const rolling = ROLLING_DEADLINE_VALUE_PATTERN.test(proposedText);
   if (rolling) {
-    if (evidence.kind !== 'rolling_deadline' || !ROLLING_EVIDENCE_PATTERN.test(quoteText)) {
+    if (!ROLLING_EVIDENCE_PATTERN.test(quoteText)) {
       return { valid: false, reason: 'a fonte não confirma inscrições contínuas' };
     }
+    evidence.kind = 'rolling_deadline';
     return { valid: true, evidence };
   }
-  if (evidence.kind !== 'application_deadline' || !DEADLINE_EVIDENCE_PATTERN.test(quoteText)) {
+  if (!DEADLINE_EVIDENCE_PATTERN.test(quoteText) && !(new RegExp(REGISTRATION_RANGE_PATTERN.source)).test(quoteText)) {
     return { valid: false, reason: 'a citação descreve uma data, mas não um prazo de inscrição' };
   }
-  const proposedDate = parseDateParts(proposedValue);
-  const evidenceDate = parseDateParts(quote);
-  if (!proposedDate || !evidenceDate || !equalValue(proposedDate, evidenceDate)) {
+  if (!evidenceDateMatches(proposedValue, quote, source.text)) {
     return { valid: false, reason: 'a data proposta não corresponde à data citada' };
   }
+  evidence.kind = 'application_deadline';
   return { valid: true, evidence };
 }
 
-async function researchExistingOpportunity(supabase, runId, opportunity) {
+export async function researchExistingOpportunity(supabase, runId, opportunity, allowedTags = []) {
   const original = Object.fromEntries(REVIEW_FIELDS.map((field) => [field, opportunity[field]]));
   if (!opportunity.link) {
     const row = {
       run_id: runId, opportunity_id: opportunity.id, status: 'failed', original,
       error: 'A oportunidade não tem link oficial para pesquisa.',
     };
-    const { error } = await supabase.from('sentinel_research_proposals').upsert(row, { onConflict: 'run_id,opportunity_id' });
-    if (error) throw error;
-    return { status: 'failed', metrics: emptyMetrics() };
+    if (supabase) {
+      const { error } = await supabase.from('sentinel_research_proposals').upsert(row, { onConflict: 'run_id,opportunity_id' });
+      if (error) throw error;
+    }
+    return { status: 'failed', metrics: emptyMetrics(), row };
   }
-  let stage = 'Leitura da página oficial e links relacionados';
+  let stage = 'Planejamento e coleta de fontes oficiais';
   let metrics = emptyMetrics();
   let modelAttempts = [];
   try {
-    const research = await fetchResearchSources(opportunity.link);
-    metrics.pageFetches = research.pageFetches;
-    stage = 'Análise pelo modelo';
-    const prompt = catalogReviewPrompt(opportunity)
+    stage = 'Síntese factual da pesquisa';
+    const dossier = await researchOpportunityDossier({ url: opportunity.link, opportunity });
+    const { research, brief: researchBrief, response: briefResponse } = dossier;
+    metrics = dossier.metrics;
+    modelAttempts = briefResponse.attempts.map((attempt) => ({ ...attempt, phase: 'research_brief' }));
+    stage = 'Conversão do dossiê para o catálogo';
+    const prompt = catalogReviewPrompt(opportunity, allowedTags)
       .replace('"DD de mês de YYYY"', '"D de mês de YYYY", sem zero à esquerda')
       .concat('\n\nFORMATO OBRIGATÓRIO: escreva "4 de setembro de 2026", nunca "04 de setembro de 2026".');
-    const response = await callModel(prompt, `${sourcesForPrompt(research.sources)}\n\nRetorne o JSON de auditoria agora.`);
+    let response;
+    try {
+      response = await callStructuredModel(prompt, `PLANO EXECUTADO:\n${JSON.stringify(research.plan)}\n\nDOSSIÊ FACTUAL VALIDADO:\n${JSON.stringify(researchBrief)}\n\nFONTES COMPLETAS COM PROVENIÊNCIA:\n${sourcesForPrompt(research.sources)}\n\nConverta somente agora o conjunto da pesquisa nos campos do catálogo e retorne o JSON de auditoria.`);
+    } catch (error) {
+      error.modelAttempts = [...modelAttempts, ...(error.modelAttempts || []).map((attempt) => ({ ...attempt, phase: 'catalog_mapping' }))];
+      throw error;
+    }
     metrics = addMetrics(metrics, response.metrics);
-    modelAttempts = response.attempts;
+    modelAttempts = [...modelAttempts, ...response.attempts.map((attempt) => ({ ...attempt, phase: 'catalog_mapping' }))];
     stage = 'Validação e gravação da proposta';
-    const parsed = parseJsonObject(response.content);
+    let parsed = response.parsed;
+    let coverageFailure = '';
+    const coverageFields = catalogCoverageFields(opportunity, parsed.updates || {}, allowedTags);
+    if (coverageFields.length) {
+      try {
+        const coverageResponse = await callStructuredModel(
+          `${prompt}\n\nCHECAGEM FINAL: responda apenas sobre estes campos ainda problemáticos: ${coverageFields.join(', ')}. Considere o dossiê inteiro e não repita fatos entre eles.`,
+          `PRIMEIRA PROPOSTA:\n${JSON.stringify(parsed)}\n\nDOSSIÊ FACTUAL VALIDADO:\n${JSON.stringify(researchBrief)}\n\nFONTES COMPLETAS COM PROVENIÊNCIA:\n${sourcesForPrompt(research.sources)}\n\nCorrija somente os campos listados na checagem final, com citações literais.`,
+        );
+        metrics = addMetrics(metrics, coverageResponse.metrics);
+        modelAttempts = [...modelAttempts, ...coverageResponse.attempts.map((attempt) => ({ ...attempt, phase: 'coverage_audit' }))];
+        const coverageUpdates = Object.fromEntries(Object.entries(coverageResponse.parsed.updates || {})
+          .filter(([field]) => coverageFields.includes(field)));
+        const coverageEvidence = Object.fromEntries(Object.entries(coverageResponse.parsed.evidence || {})
+          .filter(([field]) => coverageFields.includes(field)));
+        parsed = {
+          ...parsed,
+          updates: { ...(parsed.updates || {}), ...coverageUpdates },
+          evidence: { ...(parsed.evidence || {}), ...coverageEvidence },
+          notes: [parsed.notes, coverageResponse.parsed.notes].filter(Boolean).join(' '),
+        };
+      } catch (error) {
+        if (error.metrics) metrics = addMetrics(metrics, error.metrics);
+        modelAttempts = [...modelAttempts, ...(error.modelAttempts || []).map((attempt) => ({ ...attempt, phase: 'coverage_audit' }))];
+        coverageFailure = String(error.message || error);
+      }
+    }
     const proposed = {};
     const changes = {};
     const evidence = {};
-    const validationNotes = [];
-    for (const field of REVIEW_FIELDS) {
+    const validationNotes = coverageFailure ? [`checagem de cobertura falhou: ${coverageFailure}`] : [];
+    for (const field of MODEL_REVIEW_FIELDS) {
       if (!Object.prototype.hasOwnProperty.call(parsed.updates || {}, field)) continue;
-      const normalized = normalizeUpdate(field, parsed.updates[field]);
+      const rawUpdate = parsed.updates[field];
+      let normalized = rawUpdate === null && !REQUIRED_TEXT_FIELDS.has(field) && field !== 'deadline'
+        ? null
+        : field === 'keywords' ? normalizeKeywordTags(rawUpdate, allowedTags) : normalizeUpdate(field, rawUpdate);
       if (normalized === undefined) {
         validationNotes.push(`${field} descartado: valor fora da taxonomia aceita`);
         continue;
+      }
+      if (field === 'keywords' && allowedTags.length && normalized.length < 3) {
+        validationNotes.push('keywords descartado: a checagem final não encontrou ao menos 3 tags canônicas');
+        continue;
+      }
+      if (field === 'eligibility' && normalized !== null) {
+        normalized = normalizeEligibilityForCatalog(
+          normalized,
+          parsed.updates?.language ?? original.language,
+          opportunity,
+        ) || null;
       }
       if (!isPortugueseCatalogValue(field, normalized)) {
         validationNotes.push(`${field} descartado: o valor proposto não está em português`);
@@ -901,7 +1960,15 @@ async function researchExistingOpportunity(supabase, runId, opportunity) {
       }
       if (equalValue(normalized, original[field])) continue;
       if (field === 'deadline' && specificity(normalized) < specificity(original[field])) continue;
-      const checkedEvidence = validateFieldEvidence(field, normalized, parsed.evidence?.[field], research.sources);
+      let checkedEvidence = validateFieldEvidence(field, normalized, parsed.evidence?.[field], research.sources);
+      if (!checkedEvidence.valid && field === 'eligibility') {
+        const recoveredEvidence = findEligibilityEvidence(research.sources, normalized);
+        if (recoveredEvidence) checkedEvidence = validateFieldEvidence(field, normalized, recoveredEvidence, research.sources);
+      }
+      if (!checkedEvidence.valid && field === 'process') {
+        const recoveredEvidence = findProcessEvidence(research.sources);
+        if (recoveredEvidence) checkedEvidence = validateFieldEvidence(field, normalized, recoveredEvidence, research.sources);
+      }
       if (!checkedEvidence.valid) {
         validationNotes.push(`${field} descartado: ${checkedEvidence.reason}`);
         continue;
@@ -910,17 +1977,164 @@ async function researchExistingOpportunity(supabase, runId, opportunity) {
       changes[field] = { before: original[field] ?? null, after: normalized };
       evidence[field] = checkedEvidence.evidence;
     }
-    const statusChange = changes.deadline && expiredStatusChange(proposed.deadline, original.status);
+    const primarySourceUrl = research.sources[0]?.url;
+    if (!changes.link && primarySourceUrl
+      && canonicalizeOpportunityUrl(primarySourceUrl) !== canonicalizeOpportunityUrl(original.link)) {
+      proposed.link = primarySourceUrl;
+      changes.link = { before: original.link ?? null, after: primarySourceUrl };
+      evidence.link = {
+        source_url: primarySourceUrl,
+        kind: 'official_redirect',
+        summary_pt: 'O endereÃ§o oficial redirecionou permanentemente para esta pÃ¡gina.',
+      };
+      validationNotes.push('link atualizado para o destino oficial do redirecionamento');
+    }
+    const applicationSource = !changes.link ? findOfficialApplicationSource(research.sources, original.link) : null;
+    if (applicationSource && canonicalizeOpportunityUrl(applicationSource.url) !== canonicalizeOpportunityUrl(original.link)) {
+      proposed.link = applicationSource.url;
+      changes.link = { before: original.link ?? null, after: applicationSource.url };
+      evidence.link = {
+        source_url: applicationSource.url,
+        kind: 'official_application_page',
+        summary_pt: 'PÃ¡gina oficial de submissÃ£o encontrada durante a pesquisa.',
+      };
+      validationNotes.push('link atualizado para a pÃ¡gina oficial de candidatura ou submissÃ£o');
+    }
+    const cleanedEligibility = normalizeEligibilityForCatalog(
+      original.eligibility,
+      proposed.language ?? original.language,
+      opportunity,
+    );
+    if (!changes.eligibility && cleanedEligibility && !equalValue(cleanedEligibility, original.eligibility)) {
+      const eligibilityEvidence = findEligibilityEvidence(research.sources, cleanedEligibility);
+      if (eligibilityEvidence) {
+        proposed.eligibility = cleanedEligibility;
+        changes.eligibility = { before: original.eligibility ?? null, after: cleanedEligibility };
+        evidence.eligibility = {
+          ...eligibilityEvidence,
+          summary_pt: 'Elegibilidade limpa para manter apenas critérios objetivos e mover orientações para o processo.',
+        };
+        validationNotes.push('eligibility limpa com base no conjunto dos campos e nas regras oficiais');
+      }
+    }
+    const writingType = 'Competi\u00e7\u00f5es de Escrita';
+    const writingOpportunity = normalizedText(original.type) === 'competicoes'
+      && /\b(?:ensaios?|redacao|escrita|essays?|writing)\b/.test(normalizedText(`${original.title} ${original.description}`));
+    if (!changes.type && writingType && writingOpportunity) {
+      const writingEvidence = findWritingCompetitionEvidence(research.sources);
+      if (writingEvidence) {
+        proposed.type = writingType;
+        changes.type = { before: original.type ?? null, after: writingType };
+        evidence.type = {
+          ...writingEvidence,
+          summary_pt: 'A oportunidade seleciona e publica trabalhos escritos.',
+        };
+        validationNotes.push('type especializado como competiÃ§Ã£o de escrita');
+      }
+    }
+    const recoveredDeadline = findRelevantDeadlineEvidence(research.sources, new Date(), opportunity);
+    let confirmedDeadline = null;
+    let confirmedDeadlineEvidence = null;
+    const shouldRecoverDeadline = recoveredDeadline && (!changes.deadline
+      || (isPastDate(proposed.deadline) && !isPastDate(recoveredDeadline.value)));
+    if (shouldRecoverDeadline) {
+      const checkedEvidence = validateFieldEvidence('deadline', recoveredDeadline.value, recoveredDeadline, research.sources);
+      if (checkedEvidence.valid) {
+        confirmedDeadline = recoveredDeadline.value;
+        confirmedDeadlineEvidence = checkedEvidence.evidence;
+        if (!equalValue(recoveredDeadline.value, original.deadline)) {
+          proposed.deadline = recoveredDeadline.value;
+          changes.deadline = { before: original.deadline ?? null, after: recoveredDeadline.value };
+          evidence.deadline = checkedEvidence.evidence;
+          validationNotes.push('deadline completo recuperado diretamente da fonte oficial');
+        }
+      }
+    }
+    const recoveredRollingDeadline = !changes.deadline && !isAcceptableDeadlineOutput(original.deadline)
+      ? findRollingDeadlineEvidence(research.sources)
+      : null;
+    if (recoveredRollingDeadline) {
+      const checkedEvidence = validateFieldEvidence('deadline', recoveredRollingDeadline.value, recoveredRollingDeadline, research.sources);
+      if (checkedEvidence.valid) {
+        proposed.deadline = recoveredRollingDeadline.value;
+        changes.deadline = { before: original.deadline ?? null, after: recoveredRollingDeadline.value };
+        evidence.deadline = checkedEvidence.evidence;
+        validationNotes.push('inscriÃ§Ãµes contÃ­nuas recuperadas diretamente da fonte oficial');
+      }
+    }
+    const vagueDeadline = !changes.deadline && vagueDeadlineChange(original.deadline);
+    if (vagueDeadline) {
+      proposed.deadline = null;
+      changes.deadline = vagueDeadline;
+      evidence.deadline = {
+        kind: 'invalid_catalog_value',
+        summary_pt: `Prazo vago removido: "${original.deadline}" não informa dia, mês e ano.`,
+      };
+      validationNotes.push('deadline vago removido porque não informa uma data completa');
+    }
+    const effectiveConfirmedDeadline = changes.deadline ? proposed.deadline : confirmedDeadline;
+    const effectiveDeadlineEvidence = evidence.deadline || confirmedDeadlineEvidence;
+    const statusChange = effectiveConfirmedDeadline && expiredStatusChange(effectiveConfirmedDeadline, original.status);
     if (statusChange) {
       proposed.status = 'Encerrada';
       changes.status = statusChange;
       evidence.status = {
-        ...evidence.deadline,
+        ...effectiveDeadlineEvidence,
         kind: 'expired_deadline',
-        summary_pt: `Inscrições marcadas como encerradas porque o prazo ${proposed.deadline} já passou.`,
+        summary_pt: `Inscrições marcadas como encerradas porque o prazo ${effectiveConfirmedDeadline} já passou.`,
       };
       validationNotes.push('status marcado como Encerrada porque o prazo confirmado já passou');
     }
+    const hasActiveDeadline = (isCompleteDeadlineOutput(effectiveConfirmedDeadline) && !isPastDate(effectiveConfirmedDeadline))
+      || ROLLING_DEADLINE_VALUE_PATTERN.test(normalizedText(effectiveConfirmedDeadline));
+    if (hasActiveDeadline && changes.status?.after === 'Encerrada') {
+      delete proposed.status;
+      delete changes.status;
+      delete evidence.status;
+      validationNotes.push('status Encerrada descartado porque ainda existe uma modalidade com inscrições abertas');
+    }
+    if (hasActiveDeadline && ['Encerrada', 'Revisar'].includes(original.status) && !changes.status) {
+      proposed.status = 'Aprovada';
+      changes.status = { before: original.status, after: 'Aprovada' };
+      evidence.status = {
+        ...effectiveDeadlineEvidence,
+        kind: 'active_deadline',
+        summary_pt: `O prazo ${effectiveConfirmedDeadline} confirma que ainda existe uma modalidade com inscrições abertas.`,
+      };
+      validationNotes.push('status reaberto porque uma modalidade ainda aceita inscrições');
+    }
+    const explicitlyClosed = !changes.status && !hasActiveDeadline && original.status !== 'Encerrada'
+      ? findExplicitClosedApplications(research.sources, opportunity)
+      : null;
+    if (explicitlyClosed) {
+      proposed.status = 'Encerrada';
+      changes.status = { before: original.status ?? null, after: 'Encerrada' };
+      evidence.status = {
+        ...explicitlyClosed,
+        summary_pt: 'A fonte oficial informa explicitamente que as inscrições estão encerradas.',
+      };
+      validationNotes.push('status marcado como Encerrada por declaração explícita da fonte');
+    }
+    const qualificationPatch = qualificationCatalogPatch(researchBrief.qualification, opportunity);
+    const qualificationEvidence = researchBrief.qualification.evidence[0]
+      ? {
+          ...researchBrief.qualification.evidence[0],
+          kind: 'qualification_evidence',
+          summary_pt: researchBrief.qualification.reason,
+        }
+      : { kind: 'qualification_gap', summary_pt: researchBrief.qualification.reason };
+    for (const [field, after] of Object.entries(qualificationPatch)) {
+      if (equalValue(after, original[field] ?? null)) {
+        delete proposed[field];
+        delete changes[field];
+        delete evidence[field];
+        continue;
+      }
+      proposed[field] = after;
+      changes[field] = { before: original[field] ?? null, after };
+      evidence[field] = qualificationEvidence;
+    }
+    validationNotes.push(`qualification definida como ${researchBrief.qualification.verdict}`);
     const row = {
       run_id: runId, opportunity_id: opportunity.id,
       status: Object.keys(changes).length ? 'pending' : 'no_changes',
@@ -929,24 +2143,31 @@ async function researchExistingOpportunity(supabase, runId, opportunity) {
         ...evidence,
         _sentinel: {
           selected_model: response.model,
+          research_model: briefResponse.model,
           model_attempts: modelAttempts,
-          sources: research.sources.map((source) => ({ url: source.url, relation: source.relation })),
+          sources: research.sources.map((source) => ({ url: source.url, relation: source.relation, trust: source.trust })),
+          source_assessments: researchBrief.source_assessments,
+          qualification: researchBrief.qualification,
+          research_plan: research.plan,
+          research_brief: researchBrief,
           adjacent_failures: research.adjacentFailures,
         },
       },
-      notes: [String(parsed.notes || '').trim(), validationNotes.length ? `Validação: ${validationNotes.join('; ')}.` : ''].filter(Boolean).join(' ').slice(0, 2000),
+      notes: null,
       model_calls: metrics.modelCalls, page_fetches: metrics.pageFetches,
       input_tokens: metrics.inputTokens, output_tokens: metrics.outputTokens,
       error: null, updated_at: new Date().toISOString(),
     };
-    const { error } = await supabase.from('sentinel_research_proposals').upsert(row, { onConflict: 'run_id,opportunity_id' });
-    if (error) throw error;
-    return { status: row.status, metrics };
+    if (supabase) {
+      const { error } = await supabase.from('sentinel_research_proposals').upsert(row, { onConflict: 'run_id,opportunity_id' });
+      if (error) throw error;
+    }
+    return { status: row.status, metrics, row };
   } catch (error) {
     metrics.pageFetches = Math.max(metrics.pageFetches, error.pageFetches || 0);
     if (error.metrics) metrics = addMetrics(metrics, error.metrics);
     if (error.modelAttempts) modelAttempts = error.modelAttempts;
-    await supabase.from('sentinel_research_proposals').upsert({
+    const row = {
       run_id: runId, opportunity_id: opportunity.id, status: 'failed', source_url: opportunity.link,
       original, notes: `Falha na etapa: ${stage}`,
       evidence: { _sentinel: { model_attempts: modelAttempts } },
@@ -954,8 +2175,11 @@ async function researchExistingOpportunity(supabase, runId, opportunity) {
       model_calls: metrics.modelCalls, page_fetches: metrics.pageFetches,
       input_tokens: metrics.inputTokens, output_tokens: metrics.outputTokens,
       updated_at: new Date().toISOString(),
-    }, { onConflict: 'run_id,opportunity_id' });
-    return { status: 'failed', metrics };
+    };
+    if (supabase) {
+      await supabase.from('sentinel_research_proposals').upsert(row, { onConflict: 'run_id,opportunity_id' });
+    }
+    return { status: 'failed', metrics, row };
   }
 }
 
@@ -972,7 +2196,8 @@ async function processReviewBatch(supabase, runId, opportunityIds) {
     ? await supabase.from('opportunities').select('*').in('id', pendingIds)
     : { data: [], error: null };
   if (error) throw error;
-  const results = await withConcurrency(opportunities || [], 2, (opportunity) => researchExistingOpportunity(supabase, runId, opportunity));
+  const allowedTags = await activeOpportunityTagNames(supabase);
+  const results = await withConcurrency(opportunities || [], 2, (opportunity) => researchExistingOpportunity(supabase, runId, opportunity, allowedTags));
   const metrics = addMetrics(...results.map((item) => item.metrics));
   const processed = results.length;
   const failed = results.filter((item) => item.status === 'failed').length;
@@ -1000,11 +2225,14 @@ async function applyProposal(supabase, user, proposalId, requestedFields, reques
   const { data: proposal, error } = await supabase.from('sentinel_research_proposals').select('*').eq('id', proposalId).single();
   if (error || !proposal) throw Object.assign(new Error('Proposta não encontrada.'), { statusCode: 404 });
   if (proposal.status !== 'pending') throw Object.assign(new Error('Esta proposta já foi revisada.'), { statusCode: 409 });
-  let fields = [...new Set((requestedFields || []).filter((field) => REVIEW_FIELDS.includes(field) && field in proposal.changes))];
-  let resolved = resolveProposalPatch(fields, proposal.proposed, requestedEdits);
+  const allowedTags = await activeOpportunityTagNames(supabase);
+  let fields = [...new Set((requestedFields || []).filter((field) => REVIEW_FIELDS.includes(field)
+    && field in proposal.changes && proposal.evidence?.[field]?.kind !== 'qualification_gap'))];
+  fields = qualificationAtomicSelection(fields, proposal.changes);
+  let resolved = resolveProposalPatch(fields, proposal.proposed, requestedEdits, allowedTags);
   if (fields.includes('deadline') && proposal.changes.status?.after === 'Encerrada' && isPastDate(resolved.patch.deadline)) {
     fields = [...new Set([...fields, 'status'])];
-    resolved = resolveProposalPatch(fields, proposal.proposed, requestedEdits);
+    resolved = resolveProposalPatch(fields, proposal.proposed, requestedEdits, allowedTags);
   }
   if (!fields.length) throw Object.assign(new Error('Selecione ao menos um campo para aplicar.'), { statusCode: 400 });
   const { data: opportunity, error: opportunityError } = await supabase.from('opportunities').select('*').eq('id', proposal.opportunity_id).single();
@@ -1052,10 +2280,12 @@ async function addManual(supabase, url, runId) {
     score: -1, status: 'pending', error: null, processed_at: null, updated_at: now, run_id: runId,
   }, { onConflict: 'source_url' });
   if (error) throw error;
-  return processPost(supabase, { url, caption: '', ownerUsername: 'manual' }, runId, true);
+  const allowedTags = await activeOpportunityTagNames(supabase);
+  return processPost(supabase, { url, caption: '', ownerUsername: 'manual' }, runId, true, allowedTags);
 }
 
 export default async function handler(req, res) {
+  res.setHeader?.('X-Sentinel-Prompt-Version', CATALOG_PROMPT_VERSION);
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   let supabase;
   let run;

@@ -59,7 +59,8 @@ function localSentinelApi() {
 
         try {
           req.body = await readJsonBody(req);
-          const { default: handler } = await import('./api/sentinel.js');
+          // Load through Vite's module graph so edits to the local API are invalidated like frontend modules.
+          const { default: handler } = await server.environments.ssr.runner.import('/api/sentinel.js');
           await handler(req, res);
         } catch (error) {
           console.error('[vite/api/sentinel]', error);

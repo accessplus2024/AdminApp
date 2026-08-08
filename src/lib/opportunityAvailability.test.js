@@ -4,7 +4,7 @@ import { formParaLinha } from './opportunities';
 import { OPPORTUNITY_AVAILABILITY, opportunityAvailability } from './opportunityAvailability';
 
 const row = (status) => ({
-  id: 1, title: 'Programa', status, type: 'Mentorias', areas: [], level: [], audience: [], keywords: [], resources: [],
+  id: 1, title: 'Programa', status, type: 'Mentorias', areas: [], level: [], keywords: [], resources: [],
 });
 
 describe('opportunity availability normalization', () => {

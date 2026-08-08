@@ -13,10 +13,12 @@ import Dashboard from './screens/Dashboard';
 import Opportunities from './screens/Opportunities';
 import OpportunityDetail from './screens/OpportunityDetail';
 import OpportunityEditor from './screens/OpportunityEditor';
+import TagManager from './screens/TagManager';
 import Revisao from './screens/Revisao';
 import Newsletter from './screens/Newsletter';
 import Sentinel from './screens/Sentinel';
 import Team from './screens/Team';
+import { researchCatalogOpportunities } from './lib/sentinel';
 
 const TITLES = {
   dashboard:     'Visão geral',
@@ -120,9 +122,14 @@ export default function App() {
   const openOpp   = (o, from = 'oportunidades') => { setActive(from); setRoute({ mode: 'detail', opp: o }); };
   const editOpp   = (o, from = 'oportunidades') => { setActive(from); setRoute({ mode: 'editor', opp: o }); };
   const newOpp    = ()  => { setActive('oportunidades'); setRoute({ mode: 'editor', opp: null }); };
+  const manageTags = () => { setActive('oportunidades'); setRoute({ mode: 'tags', opp: null }); };
   const backToList = ()  => setRoute({ mode: 'list', opp: null });
 
   const togglePublish = async (o) => {
+    if (o.qualificacao === 'unqualified' && o.status !== 'Publicada') {
+      alert('Esta oportunidade foi desqualificada pelo Sentinel e não pode ser publicada. Revise a qualificação primeiro.');
+      return;
+    }
     const novoUi = o.status === 'Publicada' ? 'Rascunho' : 'Publicada';
     if (isSupabaseConfigured) {
       try {
@@ -166,7 +173,7 @@ export default function App() {
       ...form,
       elegibilidade: form.elegibilidade.split('\n').map((s) => s.trim()).filter(Boolean),
       dicas:         form.dicas.split('\n').map((s) => s.trim()).filter(Boolean),
-      tagsRelacionadas: form.tags.split(',').map((s) => s.trim()).filter(Boolean),
+      tagsRelacionadas: Array.isArray(form.tags) ? form.tags : form.tags.split(',').map((s) => s.trim()).filter(Boolean),
       status: uiStatus,
     };
     delete fields.tags;
@@ -176,6 +183,18 @@ export default function App() {
       D.opportunities.unshift(Object.assign({ id: Date.now(), recursos: [] }, fields));
     }
     backToList(); rerender();
+  };
+
+  const analyzeOpportunity = async (opportunity) => {
+    const id = idDoBanco(opportunity);
+    const run = await researchCatalogOpportunities([id]);
+    setActive('sentinel');
+    setRoute({ mode: 'list', opp: null });
+    localStorage.setItem('ap_admin_screen', 'sentinel');
+    return {
+      runId: run.id,
+      changes: (run.proposals || []).reduce((total, proposal) => total + Object.keys(proposal.changes || {}).length, 0),
+    };
   };
 
   // --- Portões de autenticação ---
@@ -216,15 +235,17 @@ export default function App() {
   } else if (active === 'oportunidades') {
     if (route.mode === 'detail')
       screen = <OpportunityDetail opp={route.opp} onBack={backToList} onEdit={editOpp} onDelete={deleteOpp} onTogglePublish={togglePublish} perms={perms} />;
+    else if (route.mode === 'tags')
+      screen = <TagManager onBack={backToList} perms={perms} onCatalogChanged={reloadOpportunities} />;
     else if (route.mode === 'editor')
-      screen = <OpportunityEditor opp={route.opp} onCancel={backToList} onSave={saveOpp} onDelete={deleteOpp} />;
+      screen = <OpportunityEditor opp={route.opp} onCancel={backToList} onSave={saveOpp} onDelete={deleteOpp} onRunSentinel={analyzeOpportunity} perms={perms} />;
     else
       screen = <Opportunities onOpen={openOpp} onEdit={editOpp} onNew={newOpp} perms={perms} />;
   } else if (active === 'revisao') {
     if (route.mode === 'detail')
       screen = <OpportunityDetail opp={route.opp} onBack={backToList} onEdit={(o) => editOpp(o, 'revisao')} onDelete={deleteOpp} onTogglePublish={togglePublish} perms={perms} />;
     else if (route.mode === 'editor')
-      screen = <OpportunityEditor opp={route.opp} onCancel={backToList} onSave={saveOpp} onDelete={deleteOpp} />;
+      screen = <OpportunityEditor opp={route.opp} onCancel={backToList} onSave={saveOpp} onDelete={deleteOpp} onRunSentinel={analyzeOpportunity} perms={perms} />;
     else
       screen = (
         <Revisao
@@ -270,9 +291,10 @@ export default function App() {
     item.id === 'revisao' ? { ...item, badge: emRevisaoCount || undefined } : item
   );
   const newBtn    = (
-    <Button variant="primary" iconLeft={Ic('plus', 'ico-sm')} onClick={newOpp}>
-      Nova oportunidade
-    </Button>
+    <div style={{ display: 'flex', gap: 8 }}>
+      {active === 'oportunidades' && <Button variant="outline" iconLeft={Ic('tags', 'ico-sm')} onClick={manageTags}>Gerenciar tags</Button>}
+      <Button variant="primary" iconLeft={Ic('plus', 'ico-sm')} onClick={newOpp}>Nova oportunidade</Button>
+    </div>
   );
 
   return (

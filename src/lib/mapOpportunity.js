@@ -39,8 +39,24 @@ function toLista(texto) {
   return linhas.length > 1 ? linhas : [t];
 }
 
+export function parseOpportunityLocation(value) {
+  const raw = str(value).trim();
+  const normalized = raw.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const hasRemote = /\b(remot[oa]s?|online|virtual)/.test(normalized);
+  const hasInPerson = /\b(presencia(?:l|is)|in-person)/.test(normalized);
+  const formato = /\bhibrid/.test(normalized) || (hasRemote && hasInPerson)
+    ? 'Híbrido'
+    : hasRemote ? 'Remoto' : hasInPerson ? 'Presencial' : (raw ? 'Presencial' : '');
+  if (formato === 'Remoto') return { formato, local: '' };
+  const local = raw
+    .replace(/^\s*(?:presencial|h[ií]brido)\s*(?:[—–-]|em|:)?\s*/i, '')
+    .trim();
+  return { formato, local: local || '' };
+}
+
 export function mapOpportunity(row) {
   const status = str(row.status);
+  const location = parseOpportunityLocation(row.location);
   return {
     // identidade
     id: row.id,
@@ -55,14 +71,13 @@ export function mapOpportunity(row) {
     // classificacao (arrays garantidos)
     tipo: str(row.type),
     nivel: arr(row.level),                 // text[]
-    publico: arr(row.audience),            // text[]
     interesse: arr(row.areas),             // text[]  (as "areas de atuacao")
     areaAtuacao: arr(row.areas).join(', '),
     custo: str(row.cost),
 
     // logistica
-    formato: str(row.location),            // Remoto / Presencial / Hibrido
-    local: str(row.location),
+    formato: location.formato,
+    local: location.local,
     prazo: cap(row.deadline),              // '' quando não há prazo
 
     // status / estado
@@ -79,6 +94,8 @@ export function mapOpportunity(row) {
     infoAdicional: str(row.additionals),
     recursos: mapResources(row.resources),
     tagsRelacionadas: arr(row.keywords),
+    qualificacao: str(row.qualification_status) || 'pending',
+    motivoQualificacao: str(row.qualification_reason),
 
     // comentarios ainda nao existem no banco (feature futura)
     comentarios: [],

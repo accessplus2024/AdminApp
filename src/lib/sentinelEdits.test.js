@@ -15,6 +15,6 @@ describe('serializeResearchEdits', () => {
   });
 
   test('permite limpar uma lista selecionada', () => {
-    expect(serializeResearchEdits({ audience: '' })).toEqual({ audience: [] });
+    expect(serializeResearchEdits({ keywords: '' })).toEqual({ keywords: [] });
   });
 });

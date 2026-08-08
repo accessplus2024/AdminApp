@@ -5,17 +5,17 @@ import { OPPORTUNITY_AVAILABILITY } from '../lib/opportunityAvailability';
 const opportunities = [
   {
     id: 1, titulo: 'Programa Agosto', org: 'Org B', descricao: 'STEM', tipo: 'Mentorias',
-    custo: 'Gratuito', prazo: '17 de agosto de 2026', nivel: ['Ensino Médio'], publico: [],
+    custo: 'Gratuito', prazo: '17 de agosto de 2026', nivel: ['Ensino Médio'],
     interesse: ['STEM'], inscricoesAbertas: true, tagsRelacionadas: [], _raw: { created_at: '2026-08-01' },
   },
   {
     id: 2, titulo: 'Bolsa Julho', org: 'Org A', descricao: 'Artes', tipo: 'Bolsas de Estudo',
-    custo: 'Bolsa', prazo: '30 de julho de 2026', nivel: ['Gap'], publico: ['Baixa Renda'],
+    custo: 'Bolsa', prazo: '30 de julho de 2026', nivel: ['Gap'],
     interesse: ['Artes'], inscricoesAbertas: false, tagsRelacionadas: [], _raw: { created_at: '2026-08-02' },
   },
   {
     id: 3, titulo: 'Programa em revisão', org: 'Org C', descricao: 'Humanas', tipo: 'Mentorias',
-    custo: 'Gratuito', prazo: '', nivel: ['Ensino Médio'], publico: [],
+    custo: 'Gratuito', prazo: '', nivel: ['Ensino Médio'],
     interesse: ['Humanas'], inscricoesAbertas: null, tagsRelacionadas: [], _raw: { created_at: '2026-08-03' },
   },
 ];

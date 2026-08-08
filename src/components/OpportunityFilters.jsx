@@ -7,7 +7,7 @@ import D from '../lib/data';
 import { opportunityAvailability } from '../lib/opportunityAvailability';
 
 export const emptyOpportunityFilters = () => ({
-  tipo: [], nivel: [], publico: [], custo: [], interesse: [], inscricoes: null,
+  tipo: [], nivel: [], custo: [], interesse: [], inscricoes: null,
 });
 
 const text = (value) => String(value || '').toLocaleLowerCase('pt-BR');
@@ -39,7 +39,6 @@ export function filterAndSortOpportunities(opportunities, query, filters, sort) 
     if (filters.tipo.length && !filters.tipo.includes(opportunity.tipo)) return false;
     if (filters.custo.length && !filters.custo.includes(opportunity.custo)) return false;
     if (filters.nivel.length && !intersects(filters.nivel, opportunity.nivel)) return false;
-    if (filters.publico.length && !intersects(filters.publico, opportunity.publico)) return false;
     if (filters.interesse.length && !intersects(filters.interesse, opportunity.interesse)) return false;
     if (filters.inscricoes && opportunityAvailability(opportunity) !== filters.inscricoes) return false;
     return true;
@@ -60,7 +59,7 @@ export function useOpportunityFilters(opportunities, options = {}) {
     () => filterAndSortOpportunities(opportunities, query, filters, sort),
     [opportunities, query, filters, sort],
   );
-  const activeCount = filters.tipo.length + filters.nivel.length + filters.publico.length
+  const activeCount = filters.tipo.length + filters.nivel.length
     + filters.custo.length + filters.interesse.length + (filters.inscricoes ? 1 : 0);
   const toggle = (key, value) => setFilters((current) => ({
     ...current,

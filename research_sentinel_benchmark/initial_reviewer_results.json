@@ -1,0 +1,62 @@
+{
+  "executed_at": "2026-08-08",
+  "prompt_version": "catalog-review-v8-holistic",
+  "note": "Baseline captured after independent_expected.json was frozen and before benchmark-driven fixes.",
+  "cases": [
+    {
+      "id": 260,
+      "title": "Olimpíada Brasileira de Biologia Sintética",
+      "reviewer_status": "pending",
+      "proposed": {
+        "eligibility": "Ser estudante matriculado no Ensino Fundamental II (6º ao 9º ano) ou Ensino Médio (1ª à 3ª série) em escola pública ou privada no Brasil. Não pode ter concluído o Ensino Médio até o início das inscrições. Estudantes de cursinhos populares e EJA são elegíveis mesmo após conclusão do Ensino Médio, desde que não estejam matriculados em curso superior.",
+        "deadline": null
+      },
+      "key_notes": [
+        "A fonte principal, o formulário e o regulamento 2026 foram coletados.",
+        "O prazo Agosto foi removido, mas o encerramento em 31/07/2026 não foi recuperado.",
+        "O dossiê validado ficou sem fatos.",
+        "O status permaneceu Aprovada, apesar de o prazo já ter passado."
+      ],
+      "sources": [
+        "https://synbiobr.org/olimpiada/",
+        "https://forms.gle/bzjq12HJcFBJ5EPz8",
+        "https://drive.google.com/file/d/1mWCx2amI4pD6SJesnnm-7Pn2QghEfe-3/view?usp=drive_link"
+      ],
+      "metrics": { "modelCalls": 2, "pageFetches": 7, "inputTokens": 12860, "outputTokens": 1998 }
+    },
+    {
+      "id": 259,
+      "title": "Olimpíada Brasileira de Matemática Financeira",
+      "reviewer_status": "pending",
+      "proposed": { "deadline": null },
+      "key_notes": [
+        "A página oficial e o regulamento OBMF 2026.2 foram coletados.",
+        "O prazo Setembro foi removido, mas o encerramento em 23/09/2026 não foi recuperado.",
+        "Cinco páginas não relacionadas de outras olimpíadas foram coletadas.",
+        "Mudanças de conteúdo foram descartadas por citações não literais."
+      ],
+      "sources": [
+        "https://www.seletaeducacao.com.br/obmf",
+        "https://www.seletaeducacao.com.br/obmf-regulamento"
+      ],
+      "metrics": { "modelCalls": 2, "pageFetches": 9, "inputTokens": 23972, "outputTokens": 1682 }
+    },
+    {
+      "id": 255,
+      "title": "The Concord Review",
+      "reviewer_status": "no_changes",
+      "proposed": {},
+      "key_notes": [
+        "O URL atual é a página do Emerson Prize, não a página de submissão.",
+        "O crawler não seguiu o link Submit.",
+        "O dossiê ficou sem fatos e declarou ausentes dados disponíveis no site oficial.",
+        "Nenhum dos campos incorretos foi atualizado."
+      ],
+      "sources": [
+        "https://www.tcr.org/page-1826185",
+        "https://www.tcr.org/"
+      ],
+      "metrics": { "modelCalls": 2, "pageFetches": 9, "inputTokens": 19211, "outputTokens": 139 }
+    }
+  ]
+}

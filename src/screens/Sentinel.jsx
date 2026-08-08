@@ -8,17 +8,17 @@ import { buildCitationUrl } from '../lib/citationUrl';
 import { formatElapsedDuration } from '../lib/sentinelTime';
 import { availabilityVariant, OPPORTUNITY_AVAILABILITY, opportunityAvailability } from '../lib/opportunityAvailability';
 import {
-  addManualOpportunity, applyResearchProposal, fetchResearchRuns, fetchSentinelPosts,
+  addManualOpportunity, applyResearchProposal, fetchResearchRun, fetchResearchRuns, fetchSentinelPosts,
   PROPOSAL_STATUS, RESEARCH_RUN_STATUS, rejectResearchProposal, researchCatalogOpportunities,
   resumeCatalogResearch, runSentinel, SENTINEL_STATUS,
 } from '../lib/sentinel';
 
 const FIELD_LABELS = {
   title: 'Título', description: 'Descrição', link: 'Link', deadline: 'Prazo', areas: 'Áreas',
-  level: 'Nível', location: 'Local/formato', audience: 'Público-alvo', cost: 'Custo',
+  level: 'Nível', location: 'Local/formato', cost: 'Custo',
   language: 'Idioma', keywords: 'Palavras-chave', eligibility: 'Elegibilidade',
-  process: 'Processo seletivo', applicants: 'Dicas', additionals: 'Informações adicionais', type: 'Tipo',
-  status: 'Disponibilidade',
+  process: 'Sobre o processo', applicants: 'Dicas', additionals: 'Informações adicionais', type: 'Tipo',
+  status: 'Disponibilidade', qualification_status: 'Qualificação', qualification_reason: 'Motivo da qualificação',
 };
 const RUN_TYPES = { discovery: 'Descoberta no Instagram', manual: 'Pesquisa por URL', catalog_review: 'Revisão do catálogo' };
 const MODEL_LABELS = {
@@ -26,12 +26,22 @@ const MODEL_LABELS = {
   'openai/gpt-oss-120b': 'GPT OSS 120B',
   'z-ai/glm-5.2': 'GLM 5.2',
 };
-const ARRAY_EDIT_FIELDS = new Set(['areas', 'level', 'audience', 'keywords']);
+const SOURCE_AUTHORITY_LABELS = {
+  official_rules_or_application: 'Regulamento ou inscrição oficial',
+  same_organization_site: 'Site da organização',
+  seed_site_unverified: 'Página inicial ainda não confirmada',
+  linked_application_platform: 'Plataforma de inscrição vinculada',
+  social_lead: 'Post de origem',
+  third_party_or_unverified: 'Terceiro ou fonte não verificada',
+};
+const ARRAY_EDIT_FIELDS = new Set(['areas', 'level', 'keywords']);
 const MULTILINE_EDIT_FIELDS = new Set(['description', 'location', 'cost', 'eligibility', 'process', 'applicants', 'additionals']);
 const EDIT_SELECT_OPTIONS = {
   type: ['Programas Acadêmicos', 'Olimpíadas Científicas', 'Competições', 'Competições de Escrita', 'Mentorias', 'Bolsas de Estudo', 'Programas de Intercâmbio', 'MUNs', 'Estágios'],
   status: ['Aprovada', 'Revisar', 'Rascunho', 'Encerrada'],
+  qualification_status: ['pending', 'qualified', 'unqualified'],
 };
+const QUALIFICATION_LABELS = { pending: 'Pendente', qualified: 'Qualificada', unqualified: 'Desqualificada' };
 
 const opportunityId = (opportunity) => String(opportunity?._raw?.id || opportunity?.id);
 const countLabel = (count, singular, plural = `${singular}s`) => `${Number(count).toLocaleString('pt-BR')} ${Number(count) === 1 ? singular : plural}`;
@@ -43,6 +53,7 @@ const formatDate = (value, withTime = false) => value
 const displayValue = (value) => Array.isArray(value) ? value.join(', ') : (value == null || value === '' ? 'Não informado' : String(value));
 const displayFieldValue = (field, value) => field === 'deadline' && typeof value === 'string'
   ? displayValue(value.replace(/\b0([1-9])(?=\s+de\s+)/gi, '$1'))
+  : field === 'qualification_status' ? (QUALIFICATION_LABELS[value] || displayValue(value))
   : field === 'status' && value === 'Encerrada' ? OPPORTUNITY_AVAILABILITY.CLOSED
   : field === 'status' && value === 'Aprovada' ? OPPORTUNITY_AVAILABILITY.OPEN
   : displayValue(value);
@@ -108,6 +119,27 @@ function ModelAttempts({ entry }) {
   );
 }
 
+function ResearchSources({ sources = [] }) {
+  if (!sources.length) return null;
+  return (
+    <div className="sentinel-source-links">
+      <strong>Páginas lidas e confiabilidade</strong>
+      {sources.map((source) => {
+        const rank = Number(source.trust?.trust_rank || 0);
+        const authority = SOURCE_AUTHORITY_LABELS[source.trust?.authority]
+          || source.trust?.authority
+          || 'Fonte ainda não classificada';
+        return (
+          <div className="sentinel-source-link-row" key={source.url}>
+            <a href={source.url} target="_blank" rel="noreferrer">{source.relation || 'Fonte pesquisada'} {Ic('external-link', 'ico-xs')}</a>
+            <span>{authority}{rank > 0 ? ` · confiabilidade ${rank}/5` : ''}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function DiscoveryDetails({ post }) {
   const extracted = post.extracted || {};
   const trace = extracted._sentinel || {};
@@ -126,7 +158,7 @@ function DiscoveryDetails({ post }) {
             <Evidence value={item} />
           </div>
         ))}
-        {sources.length > 0 && <div className="sentinel-source-links"><strong>Páginas lidas</strong>{sources.map((source) => <a href={source.url} target="_blank" rel="noreferrer" key={source.url}>{source.relation || 'Fonte oficial'} {Ic('external-link', 'ico-xs')}</a>)}</div>}
+        <ResearchSources sources={sources} />
         {notes.length > 0 && <div className="sentinel-validation-notes"><strong>Validações</strong>{notes.map((note) => <span key={note}>{note}</span>)}</div>}
       </div>
     </details>
@@ -228,7 +260,7 @@ function ProposedValueEditor({ field, value, changed, onChange, onDone, onReset 
   if (EDIT_SELECT_OPTIONS[field]) {
     control = (
       <Select autoFocus value={value} onChange={(event) => onChange(event.target.value)} onKeyDown={handleKeyDown} aria-label={`Editar ${label}`}>
-        {EDIT_SELECT_OPTIONS[field].map((option) => <option value={option} key={option}>{option}</option>)}
+        {EDIT_SELECT_OPTIONS[field].map((option) => <option value={option} key={option}>{displayFieldValue(field, option)}</option>)}
       </Select>
     );
   } else if (ARRAY_EDIT_FIELDS.has(field) || MULTILINE_EDIT_FIELDS.has(field)) {
@@ -251,14 +283,17 @@ function ProposedValueEditor({ field, value, changed, onChange, onDone, onReset 
 function ProposalCard({ proposal, selection, edits = {}, onToggleField, onEditField, onResetField, onApply, onReject, busy }) {
   const [editingField, setEditingField] = useState(null);
   const status = PROPOSAL_STATUS[proposal.status] || PROPOSAL_STATUS.pending;
-  const changes = Object.entries(proposal.changes || {}).sort(([a], [b]) => (a === 'deadline' ? -1 : b === 'deadline' ? 1 : 0));
+  const changes = Object.entries(proposal.changes || {})
+    .filter(([field]) => field !== 'qualification_reason' && proposal.evidence?.[field]?.kind !== 'qualification_gap')
+    .sort(([a], [b]) => (a === 'deadline' ? -1 : b === 'deadline' ? 1 : 0));
   const selectedFields = selection || changes.map(([field]) => field);
+  const researchedSources = proposal.evidence?._sentinel?.sources || [];
   return (
     <Card className={`research-proposal${proposal.status !== 'pending' ? ' research-proposal--reviewed' : ''}`}>
       <CardHeader className="research-proposal-header">
         <div>
           <div className="research-proposal-title"><CardTitle style={{ fontSize: 16 }}>{proposal.opportunity?.title || proposal.original?.title || 'Oportunidade removida'}</CardTitle>{proposal.source_url && <a href={proposal.source_url} target="_blank" rel="noreferrer" aria-label="Abrir fonte">{Ic('external-link', 'ico-xs')}</a>}</div>
-          <p className="card-helper">{proposal.notes || `${countLabel(changes.length, 'campo com atualização sugerida', 'campos com atualização sugerida')}.`}</p>
+          <p className="card-helper">{countLabel(changes.length, 'campo com atualização sugerida', 'campos com atualização sugerida')}.</p>
         </div>
         <Badge variant={status.variant} dot>{status.label}</Badge>
       </CardHeader>
@@ -304,6 +339,12 @@ function ProposalCard({ proposal, selection, edits = {}, onToggleField, onEditFi
           );
         })}
       </CardBody>
+      {researchedSources.length > 0 && (
+        <details className="sentinel-source-details research-proposal-sources">
+          <summary>Ver fontes comparadas<span>{countLabel(researchedSources.length, 'fonte')}</span></summary>
+          <div className="sentinel-source-details__body"><ResearchSources sources={researchedSources} /></div>
+        </details>
+      )}
       {proposal.status === 'pending' && changes.length > 0 && (
         <div className="research-proposal-footer">
           <span>{selectedFields.length} de {changes.length} {changes.length === 1 ? 'mudança selecionada' : 'mudanças selecionadas'}</span>
@@ -335,17 +376,37 @@ export default function Sentinel({ perms, opportunities = [], catalogLoading = f
   const [progress, setProgress] = useState(null);
   const [notice, setNotice] = useState(null);
   const [refreshingCatalog, setRefreshingCatalog] = useState(false);
+  const [loadingRunId, setLoadingRunId] = useState(null);
   const [clockNow, setClockNow] = useState(() => Date.now());
   const activeRunIdRef = useRef(null);
   const loadRequestRef = useRef(0);
   const opportunityFilter = useOpportunityFilters(opportunities, { initialSort: 'prazo' });
+
+  const hydrateRun = useCallback(async (runId) => {
+    if (!runId) return null;
+    setLoadingRunId(runId);
+    try {
+      const detail = await fetchResearchRun(runId);
+      setRuns((current) => current.map((run) => String(run.id) === String(runId) ? detail : run));
+      return detail;
+    } catch (error) {
+      setNotice({ type: 'error', text: error.message });
+      return null;
+    } finally {
+      setLoadingRunId((current) => String(current) === String(runId) ? null : current);
+    }
+  }, []);
 
   const load = useCallback(async (preferredRunId) => {
     const requestId = ++loadRequestRef.current;
     try {
       const [nextPosts, nextRuns] = await Promise.all([fetchSentinelPosts(), fetchResearchRuns()]);
       if (requestId !== loadRequestRef.current) return;
-      setPosts(nextPosts); setRuns(nextRuns);
+      setPosts(nextPosts);
+      setRuns((current) => nextRuns.map((run) => {
+        const previous = current.find((item) => String(item.id) === String(run.id));
+        return previous?.proposals ? { ...run, proposals: previous.proposals, posts: previous.posts || [] } : run;
+      }));
       const catalogRuns = nextRuns.filter((run) => run.run_type === 'catalog_review');
       const currentRunId = activeRunIdRef.current;
       const preferred = catalogRuns.find((run) => String(run.id) === String(preferredRunId || currentRunId)) || catalogRuns[0];
@@ -353,20 +414,21 @@ export default function Sentinel({ perms, opportunities = [], catalogLoading = f
         activeRunIdRef.current = preferred.id;
         setActiveRunId(preferred.id);
         if (preferredRunId || !currentRunId) setProposalFilter(preferredProposalFilter(preferred));
+        await hydrateRun(preferred.id);
       }
     } catch (error) {
       if (requestId === loadRequestRef.current) setNotice({ type: 'error', text: error.message });
     } finally {
       if (requestId === loadRequestRef.current) setLoading(false);
     }
-  }, []);
+  }, [hydrateRun]);
 
   useEffect(() => { void load(); }, [load]);
   useEffect(() => {
     const syncVisible = () => {
       if (document.visibilityState === 'visible') void load();
     };
-    const interval = window.setInterval(syncVisible, 5000);
+    const interval = window.setInterval(syncVisible, 15000);
     window.addEventListener('focus', syncVisible);
     document.addEventListener('visibilitychange', syncVisible);
     return () => {
@@ -505,7 +567,8 @@ export default function Sentinel({ perms, opportunities = [], catalogLoading = f
     finally { setResearching(false); setProgress(null); }
   };
 
-  const proposalSelection = (proposal) => fieldSelections[proposal.id] || Object.keys(proposal.changes || {});
+  const proposalSelection = (proposal) => fieldSelections[proposal.id] || Object.keys(proposal.changes || {})
+    .filter((field) => field !== 'qualification_reason' && proposal.evidence?.[field]?.kind !== 'qualification_gap');
   const toggleProposalField = (proposal, field) => setFieldSelections((current) => {
     const values = proposalSelection(proposal);
     return { ...current, [proposal.id]: values.includes(field) ? values.filter((item) => item !== field) : values.concat(field) };
@@ -599,11 +662,11 @@ export default function Sentinel({ perms, opportunities = [], catalogLoading = f
           </Card>
 
           <Card flat>
-            <CardHeader className="section-card-header"><div><CardTitle style={{ fontSize: 16 }}>Revisar propostas</CardTitle><p className="card-helper">Confira as fontes e selecione apenas as mudanças que deseja aplicar.</p></div><div className="research-proposal-controls"><Select value={activeRunId || ''} onChange={(event) => { const id = event.target.value; const nextRun = catalogRuns.find((run) => String(run.id) === String(id)); activeRunIdRef.current = id || null; setActiveRunId(id); setProposalFilter(preferredProposalFilter(nextRun)); }} style={{ minWidth: 220 }}><option value="">Nenhuma execução</option>{catalogRuns.map((run) => <option key={run.id} value={run.id}>Execução #{run.id} · {formatDate(run.started_at, true)} · {run.processed_count}/{run.requested_count}</option>)}</Select><Select value={proposalFilter} onChange={(event) => setProposalFilter(event.target.value)} style={{ minWidth: 200 }}><option value="pending">Aguardando revisão ({proposalCounts.pending || 0})</option><option value="all">Todos os resultados ({proposalCounts.all || 0})</option>{Object.entries(PROPOSAL_STATUS).filter(([value]) => value !== 'pending').map(([value, config]) => <option value={value} key={value}>{config.label} ({proposalCounts[value] || 0})</option>)}</Select></div></CardHeader>
+            <CardHeader className="section-card-header"><div><CardTitle style={{ fontSize: 16 }}>Revisar propostas</CardTitle><p className="card-helper">Confira as fontes e selecione apenas as mudanças que deseja aplicar.</p></div><div className="research-proposal-controls"><Select value={activeRunId || ''} onChange={(event) => { const id = event.target.value; const nextRun = catalogRuns.find((run) => String(run.id) === String(id)); activeRunIdRef.current = id || null; setActiveRunId(id); setProposalFilter(preferredProposalFilter(nextRun)); void hydrateRun(id); }} style={{ minWidth: 220 }}><option value="">Nenhuma execução</option>{catalogRuns.map((run) => <option key={run.id} value={run.id}>Execução #{run.id} · {formatDate(run.started_at, true)} · {run.processed_count}/{run.requested_count}</option>)}</Select><Select value={proposalFilter} onChange={(event) => setProposalFilter(event.target.value)} style={{ minWidth: 200 }}><option value="pending">Aguardando revisão ({proposalCounts.pending || 0})</option><option value="all">Todos os resultados ({proposalCounts.all || 0})</option>{Object.entries(PROPOSAL_STATUS).filter(([value]) => value !== 'pending').map(([value, config]) => <option value={value} key={value}>{config.label} ({proposalCounts[value] || 0})</option>)}</Select></div></CardHeader>
             <CardBody className="research-proposals">
               {!activeRun ? <div className="workflow-empty">Execute uma pesquisa para gerar propostas.</div> : (
                 <>
-                  {proposals.length === 0 ? <div className="workflow-empty">Nenhuma proposta neste filtro.</div> : proposals.map((proposal) => <ProposalCard key={proposal.id} proposal={proposal} selection={proposalSelection(proposal)} edits={fieldEdits[proposal.id] || {}} onToggleField={toggleProposalField} onEditField={editProposalField} onResetField={resetProposalField} onApply={applyProposal} onReject={rejectProposal} busy={reviewingId === proposal.id} />)}
+                  {String(loadingRunId) === String(activeRun.id) ? <div className="workflow-empty">Carregando propostas…</div> : proposals.length === 0 ? <div className="workflow-empty">Nenhuma proposta neste filtro.</div> : proposals.map((proposal) => <ProposalCard key={proposal.id} proposal={proposal} selection={proposalSelection(proposal)} edits={fieldEdits[proposal.id] || {}} onToggleField={toggleProposalField} onEditField={editProposalField} onResetField={resetProposalField} onApply={applyProposal} onReject={rejectProposal} busy={reviewingId === proposal.id} />)}
                   <details className="sentinel-run-details" key={activeRun.id} onToggle={(event) => setExpandedReviewLogId(event.currentTarget.open ? activeRun.id : null)}>
                     <summary>Ver log completo da execução #{activeRun.id}<span>{countLabel(activeRun.proposals?.length || 0, 'resultado')}</span></summary>
                     {String(expandedReviewLogId) === String(activeRun.id) && <RunLog run={activeRun} now={clockNow} />}
@@ -640,7 +703,7 @@ export default function Sentinel({ perms, opportunities = [], catalogLoading = f
                   <div className="research-run-count"><strong>{run.processed_count}/{run.requested_count}</strong><span>{run.requested_count === 1 ? 'processada' : 'processadas'}</span></div>
                   <Badge variant={status.variant} dot>{status.label}</Badge>
                   <div className="research-run-actions">
-                    <Button variant={inspected ? 'primary' : 'outline'} size="sm" onClick={() => setInspectedRunId(inspected ? null : run.id)}>{inspected ? 'Fechar log' : 'Ver log'}</Button>
+                    <Button variant={inspected ? 'primary' : 'outline'} size="sm" onClick={() => { setInspectedRunId(inspected ? null : run.id); if (!inspected) void hydrateRun(run.id); }}>{inspected ? 'Fechar log' : 'Ver log'}</Button>
                     {resumable && <Button variant="outline" size="sm" onClick={() => resume(run)} disabled={researching}>{remaining > 0 ? `Retomar (${remaining})` : 'Finalizar'}</Button>}
                   </div>
                 </article>
