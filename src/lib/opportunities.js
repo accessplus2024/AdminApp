@@ -5,13 +5,21 @@ import { mapOpportunities, mapOpportunity } from './mapOpportunity';
 // ---------------------------------------------------------------------------
 // LEITURA
 // ---------------------------------------------------------------------------
-export async function fetchOpportunities() {
+const OPPORTUNITY_SELECT = [
+  'id', 'title', 'description', 'link', 'deadline', 'areas', 'level', 'location',
+  'cost', 'language', 'keywords', 'eligibility', 'process', 'applicants',
+  'additionals', 'resources', 'status', 'review', 'created_at', 'type',
+  'sentinel_discovery_key', 'qualification_status', 'qualification_reason',
+].join(',');
+
+export async function fetchOpportunities({ throwOnError = false } = {}) {
   if (!isSupabaseConfigured) return [];
   const { data, error } = await supabase
     .from('opportunities')
-    .select('*')
+    .select(OPPORTUNITY_SELECT)
     .order('created_at', { ascending: false });
   if (error) {
+    if (throwOnError) throw new Error(error.message);
     console.error('[Access+] Erro ao ler oportunidades do Supabase:', error.message);
     return [];
   }
@@ -23,9 +31,17 @@ export async function fetchOpportunities() {
 // ---------------------------------------------------------------------------
 const splitCommas = (s) => String(s || '').split(',').map((x) => x.trim()).filter(Boolean);
 
+export function serializeOpportunityLocation(form = {}) {
+  const format = String(form.formato || '').trim();
+  const place = String(form.local || '').trim();
+  if (/^(?:remoto|online)$/i.test(format)) return 'Remoto';
+  if (!format) return place || null;
+  return place ? [format, place].join(' — ') : format;
+}
+
 // status da UI ('Publicada'/'Rascunho'/'Aprovada'/'Em revisão') -> status do banco.
-function statusParaBanco(ui) {
-  if (ui === 'Publicada' || ui === 'Aprovada') return 'Aprovada';
+function statusParaBanco(ui, inscricoesAbertas) {
+  if (ui === 'Publicada' || ui === 'Aprovada') return inscricoesAbertas === false ? 'Encerrada' : 'Aprovada';
   return 'Revisar';   // 'Rascunho' / 'Em revisão' / qualquer outro
 }
 
@@ -39,17 +55,17 @@ export function formParaLinha(form, uiStatus, existente = null) {
     description: form.descricao || '',
     type: form.tipo || '',
     level: form.nivel || [],
-    audience: form.publico || [],
+    audience: [],
     areas: form.interesse || [],
     cost: form.custo || null,
-    location: form.formato || form.local || null,
+    location: serializeOpportunityLocation(form),
     deadline: form.prazo || null,
     // colunas de TEXTO no banco (o mapper divide em lista na leitura):
     eligibility: form.elegibilidade || '',
     process: form.processo || '',
     applicants: form.dicas || '',            // "dicas de contemplados"
     additionals: form.infoAdicional || '',
-    keywords: splitCommas(form.tags),
+    keywords: Array.isArray(form.tags) ? form.tags : splitCommas(form.tags),
     language: form.lingua || ex.language || null,
     link: form.link || ex.link || null,
     // editor guarda recursos no formato da UI {plataforma,titulo,meta};
@@ -59,7 +75,7 @@ export function formParaLinha(form, uiStatus, existente = null) {
           .map((r) => ({ platform: r.plataforma || '', label: r.titulo || '', url: r.meta || '' }))
           .filter((r) => r.url || r.label)
       : (ex.resources || []),
-    status: statusParaBanco(uiStatus),
+    status: statusParaBanco(uiStatus, form.inscricoesAbertas),
   };
 }
 

@@ -13,15 +13,19 @@ import Dashboard from './screens/Dashboard';
 import Opportunities from './screens/Opportunities';
 import OpportunityDetail from './screens/OpportunityDetail';
 import OpportunityEditor from './screens/OpportunityEditor';
+import TagManager from './screens/TagManager';
 import Revisao from './screens/Revisao';
 import Newsletter from './screens/Newsletter';
+import Sentinel from './screens/Sentinel';
 import Team from './screens/Team';
+import { researchCatalogOpportunities } from './lib/sentinel';
 
 const TITLES = {
   dashboard:     'Visão geral',
   oportunidades: 'Oportunidades',
   revisao:       'Em revisão',
-  //newsletter:    'Newsletter',
+  sentinel:      'Sentinel',
+  newsletter:    'Newsletter',
   time:          'Membros do time',
   //config:        'Configurações',
 };
@@ -29,10 +33,11 @@ const SUBS = {
   dashboard:     'Acompanhe e gerencie as oportunidades em um só lugar.',
   oportunidades: 'Crie, filtre, edite e publique as oportunidades visíveis para os estudantes.',
   revisao:       'Oportunidades aguardando aprovação antes de irem pro ar.',
-  //newsletter:    'Monte e publique a newsletter a partir das contas de Instagram conectadas.',
+  sentinel:      'Encontre, filtre e pesquise oportunidades antes da revisão editorial.',
+  newsletter:    'Monte edições com o catálogo e mantenha o histórico de cada oportunidade.',
   time:          'Gerencie quem tem acesso ao painel e suas permissões.',
 };
-const VALID_SCREENS = ['dashboard', 'oportunidades', 'revisao', 'time'];
+const VALID_SCREENS = ['dashboard', 'oportunidades', 'revisao', 'sentinel', 'newsletter', 'time'];
 
 export default function App() {
   // --- Autenticação ---
@@ -68,21 +73,41 @@ export default function App() {
     return VALID_SCREENS.includes(s) ? s : 'dashboard';
   });
   const [route, setRoute]   = useState({ mode: 'list', opp: null });
-  const [, setTick]         = useState(0);
-  const rerender = () => setTick((t) => t + 1);
+  const [opportunities, setOpportunities] = useState(() => D.opportunities.slice());
+  const [opportunitiesLoading, setOpportunitiesLoading] = useState(isSupabaseConfigured);
+  const rerender = () => setOpportunities(D.opportunities.slice());
+
+  const syncOpportunities = (lista) => {
+    D.opportunities.length = 0;
+    D.opportunities.push(...lista);
+    setOpportunities(lista.slice());
+  };
+
+  const reloadOpportunities = async () => {
+    if (!isSupabaseConfigured) {
+      rerender();
+      return D.opportunities.slice();
+    }
+    setOpportunitiesLoading(true);
+    try {
+      const lista = await fetchOpportunities({ throwOnError: true });
+      syncOpportunities(lista);
+      return lista;
+    } finally {
+      setOpportunitiesLoading(false);
+    }
+  };
 
   // Ao abrir o app, tenta carregar as oportunidades REAIS do Supabase.
   // Se conseguir, substitui os dados de exemplo (mock) que ja estao em D.
   // Se nao estiver configurado (ou der erro), o app segue com o mock.
   useEffect(() => {
     let ativo = true;
-    fetchOpportunities().then((lista) => {
-      if (ativo && lista.length) {
-        D.opportunities.length = 0;         // esvazia o mock
-        D.opportunities.push(...lista);      // coloca os dados reais
-        rerender();                          // redesenha as telas
-      }
-    });
+    if (!isSupabaseConfigured) return () => { ativo = false; };
+    fetchOpportunities({ throwOnError: true })
+      .then((lista) => { if (ativo) syncOpportunities(lista); })
+      .catch((error) => console.error('[Access+] Erro ao sincronizar o catálogo:', error.message))
+      .finally(() => { if (ativo) setOpportunitiesLoading(false); });
     return () => { ativo = false; };
   }, []);
 
@@ -97,9 +122,14 @@ export default function App() {
   const openOpp   = (o, from = 'oportunidades') => { setActive(from); setRoute({ mode: 'detail', opp: o }); };
   const editOpp   = (o, from = 'oportunidades') => { setActive(from); setRoute({ mode: 'editor', opp: o }); };
   const newOpp    = ()  => { setActive('oportunidades'); setRoute({ mode: 'editor', opp: null }); };
+  const manageTags = () => { setActive('oportunidades'); setRoute({ mode: 'tags', opp: null }); };
   const backToList = ()  => setRoute({ mode: 'list', opp: null });
 
   const togglePublish = async (o) => {
+    if (o.qualificacao === 'unqualified' && o.status !== 'Publicada') {
+      alert('Esta oportunidade foi desqualificada pelo Sentinel e não pode ser publicada. Revise a qualificação primeiro.');
+      return;
+    }
     const novoUi = o.status === 'Publicada' ? 'Rascunho' : 'Publicada';
     if (isSupabaseConfigured) {
       try {
@@ -143,7 +173,7 @@ export default function App() {
       ...form,
       elegibilidade: form.elegibilidade.split('\n').map((s) => s.trim()).filter(Boolean),
       dicas:         form.dicas.split('\n').map((s) => s.trim()).filter(Boolean),
-      tagsRelacionadas: form.tags.split(',').map((s) => s.trim()).filter(Boolean),
+      tagsRelacionadas: Array.isArray(form.tags) ? form.tags : form.tags.split(',').map((s) => s.trim()).filter(Boolean),
       status: uiStatus,
     };
     delete fields.tags;
@@ -153,6 +183,18 @@ export default function App() {
       D.opportunities.unshift(Object.assign({ id: Date.now(), recursos: [] }, fields));
     }
     backToList(); rerender();
+  };
+
+  const analyzeOpportunity = async (opportunity) => {
+    const id = idDoBanco(opportunity);
+    const run = await researchCatalogOpportunities([id]);
+    setActive('sentinel');
+    setRoute({ mode: 'list', opp: null });
+    localStorage.setItem('ap_admin_screen', 'sentinel');
+    return {
+      runId: run.id,
+      changes: (run.proposals || []).reduce((total, proposal) => total + Object.keys(proposal.changes || {}).length, 0),
+    };
   };
 
   // --- Portões de autenticação ---
@@ -193,15 +235,17 @@ export default function App() {
   } else if (active === 'oportunidades') {
     if (route.mode === 'detail')
       screen = <OpportunityDetail opp={route.opp} onBack={backToList} onEdit={editOpp} onDelete={deleteOpp} onTogglePublish={togglePublish} perms={perms} />;
+    else if (route.mode === 'tags')
+      screen = <TagManager onBack={backToList} perms={perms} onCatalogChanged={reloadOpportunities} />;
     else if (route.mode === 'editor')
-      screen = <OpportunityEditor opp={route.opp} onCancel={backToList} onSave={saveOpp} onDelete={deleteOpp} />;
+      screen = <OpportunityEditor opp={route.opp} onCancel={backToList} onSave={saveOpp} onDelete={deleteOpp} onRunSentinel={analyzeOpportunity} perms={perms} />;
     else
       screen = <Opportunities onOpen={openOpp} onEdit={editOpp} onNew={newOpp} perms={perms} />;
   } else if (active === 'revisao') {
     if (route.mode === 'detail')
       screen = <OpportunityDetail opp={route.opp} onBack={backToList} onEdit={(o) => editOpp(o, 'revisao')} onDelete={deleteOpp} onTogglePublish={togglePublish} perms={perms} />;
     else if (route.mode === 'editor')
-      screen = <OpportunityEditor opp={route.opp} onCancel={backToList} onSave={saveOpp} onDelete={deleteOpp} />;
+      screen = <OpportunityEditor opp={route.opp} onCancel={backToList} onSave={saveOpp} onDelete={deleteOpp} onRunSentinel={analyzeOpportunity} perms={perms} />;
     else
       screen = (
         <Revisao
@@ -211,8 +255,10 @@ export default function App() {
           perms={perms}
         />
       );
-  //} else if (active === 'newsletter') {
-   // screen = <Newsletter />;
+  } else if (active === 'sentinel') {
+    screen = <Sentinel perms={perms} opportunities={opportunities} catalogLoading={opportunitiesLoading} onCatalogChanged={reloadOpportunities} />;
+  } else if (active === 'newsletter') {
+    screen = <Newsletter opportunities={opportunities} perms={perms} />;
   } else if (active === 'time') {
     screen = <Team perms={perms} />;
   } else {
@@ -245,9 +291,10 @@ export default function App() {
     item.id === 'revisao' ? { ...item, badge: emRevisaoCount || undefined } : item
   );
   const newBtn    = (
-    <Button variant="primary" iconLeft={Ic('plus', 'ico-sm')} onClick={newOpp}>
-      Nova oportunidade
-    </Button>
+    <div style={{ display: 'flex', gap: 8 }}>
+      {active === 'oportunidades' && <Button variant="outline" iconLeft={Ic('tags', 'ico-sm')} onClick={manageTags}>Gerenciar tags</Button>}
+      <Button variant="primary" iconLeft={Ic('plus', 'ico-sm')} onClick={newOpp}>Nova oportunidade</Button>
+    </div>
   );
 
   return (

@@ -7,12 +7,12 @@
 // O resto abaixo (nav, filters, variants) é configuração da interface, não
 // conteúdo de exemplo — continua fixo.
 const D = {
-  // Newsletter e Configurações ficam de fora do menu por enquanto — não fazem
-  // parte desta versão (o código continua no projeto, só não aparece no nav).
   nav: [
     { id: 'dashboard',     label: 'Visão geral',    icon: 'LayoutDashboard' },
     { id: 'oportunidades', label: 'Oportunidades',   icon: 'Compass' },
     { id: 'revisao',       label: 'Em revisão',      icon: 'FilePen' },
+    { id: 'sentinel',      label: 'Sentinel',        icon: 'Radar' },
+    { id: 'newsletter',    label: 'Newsletter',      icon: 'Newspaper' },
     { id: 'time',          label: 'Membros do time', icon: 'UsersRound' },
   ],
 
@@ -21,11 +21,8 @@ const D = {
       'Olimpíadas Científicas', 'MUNs', 'Programas Acadêmicos', 'Programas de Intercâmbio',
       'Bolsas de Estudo', 'Competições', 'Competições de Escrita', 'Mentorias',
     ] },
-    { key: 'inscricoes', label: 'Inscrições abertas', type: 'radio', options: ['Sim', 'Não'] },
+    { key: 'inscricoes', label: 'Disponibilidade', type: 'radio', options: ['Inscrições abertas', 'Inscrições encerradas'] },
     { key: 'nivel', label: 'Nível', type: 'check', options: ['Fundamental', 'Ensino Médio', 'Gap'] },
-    { key: 'publico', label: 'Público-alvo', type: 'check', options: [
-      'Negros', 'LGBT', 'Baixa Renda', 'Indígenas', 'Deficientes', 'Meninas', 'Escola Pública',
-    ] },
     { key: 'custo', label: 'Custo', type: 'check', options: ['Bolsa', 'Gratuito', 'Totalmente Financiado'] },
     { key: 'interesse', label: 'Interesse', type: 'check', options: ['Meio Ambiente', 'Humanas', 'STEM', 'Linguagens', 'Artes'] },
   ],
@@ -40,7 +37,7 @@ const D = {
   activity: [],
 
   statusVariant: {
-    'Publicada': 'success', 'Em revisão': 'warning', 'Rascunho': 'neutral', 'Encerrada': 'danger',
+    'Publicada': 'success', 'Em revisão': 'warning', 'Rascunho': 'neutral', 'Inscrições encerradas': 'danger',
     'Ativo': 'success', 'Convite pendente': 'warning', 'Inativo': 'neutral',
   },
   papelVariant: { 'Admin': 'primary', 'Editor': 'mint', 'Analista': 'pink', 'Viewer': 'neutral' },

@@ -1,0 +1,72 @@
+{
+  "researched_at": "2026-08-08",
+  "method": "Independent manual research from official sources, frozen before running Sentinel.",
+  "amendments": [
+    "OBBS was corrected after a second direct verification: the independently fetched official page showed 07/08/2026, replacing the initially recorded 31/07/2026. Sentinel's raw HTTP fetch simultaneously showed 14/08/2026, so the comparison preserves this source-level conflict instead of forcing agreement."
+  ],
+  "opportunities": [
+    {
+      "id": 260,
+      "title": "Olimpíada Brasileira de Biologia Sintética",
+      "description": "Competição nacional gratuita sobre biotecnologia e biologia sintética, com questionário socioeconômico e duas fases on-line. Estudantes concorrem a medalhas, enquanto escolas e responsáveis podem receber certificações.",
+      "link": "https://synbiobr.org/olimpiada/",
+      "deadline": "7 de agosto de 2026",
+      "areas": ["STEM"],
+      "level": ["Fundamental", "Ensino Médio"],
+      "location": "Inscrição e provas on-line",
+      "audience": [],
+      "cost": "Gratuito",
+      "language": "Português",
+      "keywords": ["biologia sintética", "biotecnologia", "olimpíada científica"],
+      "eligibility": "Estar matriculado do 6º ao 9º ano do ensino fundamental\nEstar matriculado da 1ª à 3ª série do ensino médio",
+      "process": "Peça a um professor ou coordenador para preencher o formulário. Envie a planilha dos estudantes. Aguarde a confirmação e os acessos por e-mail.",
+      "applicants": "Descanse bem e leia as questões com calma; não é necessário conhecimento prévio.",
+      "additionals": "A segunda fase exige desempenho superior a 60% na primeira.",
+      "type": "Olimpíadas Científicas",
+      "status": "Encerrada",
+      "sources": ["https://synbiobr.org/olimpiada/"]
+    },
+    {
+      "id": 259,
+      "title": "Olimpíada Brasileira de Matemática Financeira",
+      "description": "Olimpíada on-line de fase única sobre educação financeira e matemática aplicada ao cotidiano. Adultos e estudantes do 4º ano do fundamental ao ensino médio participam em cinco níveis e recebem certificados digitais; medalhas físicas são opcionais.",
+      "link": "https://www.seletaeducacao.com.br/obmf",
+      "deadline": "23 de setembro de 2026",
+      "areas": ["STEM", "Humanas"],
+      "level": ["Fundamental", "Ensino Médio", "Gap Year"],
+      "location": "Inscrição e prova on-line",
+      "audience": [],
+      "cost": "Gratuito para escolas públicas; R$ 20 por estudante de escola privada; inscrições individuais de R$ 29 a R$ 39, conforme o período",
+      "language": "Português",
+      "keywords": ["educação financeira", "matemática financeira", "olimpíada científica"],
+      "eligibility": "Estar matriculado a partir do 4º ano do ensino fundamental\nEstar matriculado no ensino médio, técnico ou EJA\nTer concluído o ensino médio para participar da categoria Livre",
+      "process": "Cadastre-se no Portal Seleta individualmente ou por uma escola. Finalize o pagamento, quando aplicável. Acesse a prova na área logada em 30 de setembro.",
+      "applicants": "Use um e-mail pessoal válido e teste áudio e vídeo antes da prova.",
+      "additionals": "Resultados e certificados digitais ficam disponíveis em 7 de outubro; medalhas físicas são opcionais.",
+      "type": "Olimpíadas Científicas",
+      "status": "Aprovada",
+      "sources": ["https://www.seletaeducacao.com.br/obmf", "https://www.seletaeducacao.com.br/obmf-regulamento"]
+    },
+    {
+      "id": 255,
+      "title": "The Concord Review",
+      "description": "Revista acadêmica trimestral que avalia ensaios de história escritos individualmente por estudantes do ensino médio. Cerca de 5% dos textos recebidos são publicados, e cada submissão é considerada para as três edições seguintes.",
+      "link": "https://www.tcr.org/submit",
+      "deadline": "Inscrições contínuas",
+      "areas": ["Humanas", "Linguagens"],
+      "level": ["Ensino Médio", "Gap Year"],
+      "location": "Candidatura on-line",
+      "audience": [],
+      "cost": "Taxa de submissão de US$ 70, incluindo assinatura digital de um ano",
+      "language": "Inglês",
+      "keywords": ["ensaio de história", "revista acadêmica", "escrita"],
+      "eligibility": "Ter concluído o ensaio antes de terminar o ensino médio\nSer o único autor do ensaio\nEnviar texto original e não publicado fora da escola",
+      "process": "Preencha o formulário de submissão on-line. Envie um único arquivo com notas finais e bibliografia. Pague a taxa após enviar o formulário.",
+      "applicants": "Escolha um tema informativo, escreva com clareza e use bibliografia substancial.",
+      "additionals": "Para edições específicas, os cortes são 1º de agosto, novembro, fevereiro e maio.",
+      "type": "Competições de Escrita",
+      "status": "Aprovada",
+      "sources": ["https://www.tcr.org/submit", "https://tcr.org/Submit-redirect"]
+    }
+  ]
+}

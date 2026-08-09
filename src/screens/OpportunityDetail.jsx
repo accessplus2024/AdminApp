@@ -5,6 +5,7 @@ import D from '../lib/data';
 import { fetchComments, deleteComment } from '../lib/comments';
 import { isSupabaseConfigured } from '../lib/supabase';
 import { idDoBanco } from '../lib/opportunities';
+import { availabilityVariant, OPPORTUNITY_AVAILABILITY, opportunityAvailability } from '../lib/opportunityAvailability';
 
 const PLAT = {
   youtube:   { label: 'YouTube',   icon: 'youtube',        color: '#FF0000' },
@@ -70,6 +71,7 @@ export default function OpportunityDetail({ opp, onBack, onEdit, onDelete, onTog
   };
 
   const published = opp.status === 'Publicada';
+  const availability = opportunityAvailability(opp);
   const para = { fontSize: 14.5, lineHeight: 1.6, color: 'var(--neutral-700)' };
 
   return (
@@ -80,7 +82,7 @@ export default function OpportunityDetail({ opp, onBack, onEdit, onDelete, onTog
         <div style={{ flex: 1 }} />
         {perms.canWrite && (<>
           <Button variant="outline" iconLeft={Ic('pencil', 'ico-sm')} onClick={() => onEdit(opp)}>Editar</Button>
-          <Button variant={published ? 'secondary' : 'primary'} iconLeft={Ic(published ? 'eye-off' : 'send', 'ico-sm')} onClick={() => onTogglePublish(opp)}>
+          <Button variant={published ? 'secondary' : 'primary'} iconLeft={Ic(published ? 'eye-off' : 'send', 'ico-sm')} onClick={() => onTogglePublish(opp)} disabled={!published && opp.qualificacao === 'unqualified'} title={!published && opp.qualificacao === 'unqualified' ? 'Revise a qualificação antes de publicar.' : undefined}>
             {published ? 'Despublicar' : 'Publicar'}
           </Button>
           <Button variant="ghost" size="icon" aria-label="Excluir" onClick={() => setConfirm(true)} style={{ color: 'var(--vermelha)' }}>
@@ -111,10 +113,11 @@ export default function OpportunityDetail({ opp, onBack, onEdit, onDelete, onTog
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7 }}>
             <Badge variant={D.tipoVariant[opp.tipo] || 'neutral'}>{opp.tipo}</Badge>
             <Badge variant={D.custoVariant[opp.custo] || 'neutral'}>{opp.custo}</Badge>
-            <Badge variant={opp.inscricoesAbertas ? 'success' : 'neutral'} dot>
-              {opp.inscricoesAbertas ? 'Inscrições abertas' : 'Inscrições fechadas'}
-            </Badge>
+            {availability !== OPPORTUNITY_AVAILABILITY.UNKNOWN && availability !== opp.status && (
+              <Badge variant={availabilityVariant(opp)} dot>{availability}</Badge>
+            )}
             {opp.interesse.map((i) => <Badge key={i} variant="lime">{i}</Badge>)}
+            {opp.qualificacao === 'unqualified' && <Badge variant="danger">Desqualificada pelo Sentinel</Badge>}
           </div>
         </CardBody>
       </Card>
@@ -128,8 +131,14 @@ export default function OpportunityDetail({ opp, onBack, onEdit, onDelete, onTog
             </Section>
           )}
 
+          {opp.qualificacao === 'unqualified' && opp.motivoQualificacao && (
+            <div className="workflow-notice workflow-notice--error">
+              Esta oportunidade não atende ao critério do Access+: {opp.motivoQualificacao}
+            </div>
+          )}
+
           {opp.elegibilidade.length > 0 && (
-            <Section icon="clipboard-check" title="Elegibilidade e guia de aplicação">
+            <Section icon="clipboard-check" title="Elegibilidade">
               <ul style={{ margin: 0, paddingLeft: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 10 }}>
                 {opp.elegibilidade.map((e, i) => (
                   <li key={i} style={{ display: 'flex', gap: 10, ...para }}>
@@ -267,19 +276,11 @@ export default function OpportunityDetail({ opp, onBack, onEdit, onDelete, onTog
               <Fact icon="bar-chart-3" label="Nível"              value={opp.nivel.join(' · ')} />
               <Fact icon="wallet"      label="Custo"              value={opp.custo} />
               <Fact icon="monitor"     label="Formato"            value={opp.formato} />
-              <Fact icon="map-pin"     label="Local"              value={opp.local} />
+              {opp.formato !== 'Remoto' && opp.local && <Fact icon="map-pin" label="Local" value={opp.local} />}
               <Fact icon="target"      label="Área de atuação"    value={opp.areaAtuacao} />
             </CardBody>
           </Card>
 
-          <Card>
-            <CardHeader><CardTitle style={{ fontSize: 15 }}>Público-alvo</CardTitle></CardHeader>
-            <CardBody style={{ paddingTop: 10 }}>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7 }}>
-                {opp.publico.map((p) => <Badge key={p} variant="pink">{p}</Badge>)}
-              </div>
-            </CardBody>
-          </Card>
         </div>
       </div>
 
