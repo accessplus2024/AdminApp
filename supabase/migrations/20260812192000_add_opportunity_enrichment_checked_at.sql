@@ -1,0 +1,6 @@
+-- Superseded: decidimos não criar uma coluna de controle pra isso. O
+-- enriquecimento automático agora só olha oportunidades "Aprovada" recém
+-- criadas (created_at dentro de uma janela, sem precisar de coluna nova) e,
+-- se não achar nada, deixa pro voluntário rodar manualmente pelo botão
+-- "Enriquecer" na própria oportunidade. Este arquivo fica só como registro;
+-- não precisa ser aplicado.

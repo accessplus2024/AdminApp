@@ -43,6 +43,19 @@ export async function fetchSentinelPosts() {
   return data || [];
 }
 
+// Descarta um post do Sentinel que ficou "qualificado" mas sem nenhuma
+// oportunidade vinculada (opportunity_id nulo) — não tem o que aplicar nem
+// rejeitar no catálogo, mas o registro continua poluindo "Resultados por
+// fonte" pra sempre se ninguém puder tirá-lo de vista.
+export async function dismissSentinelPost(postId, note) {
+  if (!isSupabaseConfigured) throw new Error('Supabase não configurado (.env).');
+  const { error } = await supabase
+    .from('sentinel_posts')
+    .update({ status: 'rejected', error: note || 'Descartado manualmente na revisão.' })
+    .eq('id', postId);
+  if (error) throw new Error(error.message);
+}
+
 export async function fetchResearchRuns(limit = 20) {
   if (!isSupabaseConfigured) return [];
   const { data, error } = await supabase

@@ -440,6 +440,7 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; }
 }
 .workflow-notice--success { color: #157a51; background: #e6f6ee; border-color: #c4e9d5; }
 .workflow-notice--error { color: #c8301f; background: var(--vermelha-soft); border-color: #fcc8c0; }
+.workflow-notice--warning { color: #8a5a06; background: #fdf6e7; border-color: #f3e2b8; }
 .workflow-empty { padding: 30px 18px; text-align: center; color: var(--muted-foreground); font-size: 13px; border: 1px dashed var(--border); border-radius: var(--radius-md); }
 .card-helper { color: var(--muted-foreground); font-size: 12.5px; line-height: 1.45; margin-top: 5px; }
 .section-card-header { display: flex; align-items: center; justify-content: space-between; gap: 14px; }

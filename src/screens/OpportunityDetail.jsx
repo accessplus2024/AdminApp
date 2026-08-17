@@ -118,6 +118,7 @@ export default function OpportunityDetail({ opp, onBack, onEdit, onDelete, onTog
             )}
             {opp.interesse.map((i) => <Badge key={i} variant="lime">{i}</Badge>)}
             {opp.qualificacao === 'unqualified' && <Badge variant="danger">Desqualificada pelo Sentinel</Badge>}
+            {opp.qualificacao === 'pending' && opp.motivoQualificacao && <Badge variant="warning">Elegibilidade incerta — revisar</Badge>}
           </div>
         </CardBody>
       </Card>
@@ -134,6 +135,12 @@ export default function OpportunityDetail({ opp, onBack, onEdit, onDelete, onTog
           {opp.qualificacao === 'unqualified' && opp.motivoQualificacao && (
             <div className="workflow-notice workflow-notice--error">
               Esta oportunidade não atende ao critério do Access+: {opp.motivoQualificacao}
+            </div>
+          )}
+
+          {opp.qualificacao === 'pending' && opp.motivoQualificacao && (
+            <div className="workflow-notice workflow-notice--warning">
+              O Sentinel não confirmou com certeza que jovens brasileiros podem participar: {opp.motivoQualificacao} Confira as fontes e ajuste a qualificação antes de publicar.
             </div>
           )}
 

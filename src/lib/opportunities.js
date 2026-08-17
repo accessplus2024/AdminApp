@@ -102,8 +102,25 @@ export async function updateOpportunity(id, campos) {
   return mapOpportunity(data);
 }
 
+// Antes de excluir, avisa no log do Sentinel (sentinel_posts) que aquela
+// origem não vira mais oportunidade — sem isso, o post ligado a ela continua
+// para sempre com o rótulo "Qualificada" em "Resultados por fonte", como se
+// a oportunidade ainda existisse no catálogo (mesmo já excluída).
+async function marcarPostsComoRemovidos(opportunityId) {
+  if (!opportunityId) return;
+  const nota = `Removida do catálogo em ${new Date().toLocaleDateString('pt-BR')} (excluída após aprovação/qualificação).`;
+  await supabase.from('sentinel_posts')
+    .update({ error: nota })
+    .eq('opportunity_id', opportunityId)
+    .is('error', null);
+}
+
 export async function deleteOpportunity(id) {
   garantirConfig();
+  // Precisa rodar ANTES do delete: a FK sentinel_posts.opportunity_id é
+  // "on delete set null", então depois de excluir a oportunidade não dá mais
+  // pra achar o post pelo opportunity_id.
+  try { await marcarPostsComoRemovidos(id); } catch { /* não bloqueia a exclusão por causa do log */ }
   const { error } = await supabase.from('opportunities').delete().eq('id', id);
   if (error) throw new Error(error.message);
 }

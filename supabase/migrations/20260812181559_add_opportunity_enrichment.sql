@@ -1,0 +1,4 @@
+-- Superseded: o enriquecimento (Serper/YouTube/Reddit) passou a salvar os
+-- links direto em `opportunities.resources` (coluna que já existia), em vez
+-- de uma coluna nova. Nenhuma migração de schema é necessária pra essa
+-- feature. Este arquivo fica só como registro; não precisa ser aplicado.

@@ -17,7 +17,10 @@ const SOURCE_CHAR_LIMIT = Math.max(18_000, Math.min(Number(process.env.SENTINEL_
 const MAX_DISCOVERY_CANDIDATES = 500;
 const CATALOG_PROMPT_VERSION = 'catalog-review-v11-unified-research';
 const DISCOVERY_PROMPT_VERSION = 'discovery-v6-unified-research';
-const SOURCE_ACCOUNTS = ['opportunitydesk', 'opportunities_corners', 'opportunitiesforyouth', 'adroiteducation', 'borderless.so'];
+// Contas de Instagram: antes fixas aqui, agora vêm da tabela
+// sentinel_instagram_accounts (editável por Admin/Editor na tela do
+// Sentinel, sem deploy) — ver activeInstagramAccounts() abaixo.
+const MIN_DISCOVERY_SCORE = 4; // abaixo disso, nem entra no histórico (ver runDiscovery)
 const HS_SIGNALS = ['high school', 'secondary school', 'high schooler', 'grade 9', 'grade 10', 'grade 11', 'grade 12'];
 const YOUTH_SIGNALS = ['youth', 'young people', 'teenager', 'teen', '16', '17', '18'];
 const FUNDING_SIGNALS = ['funded', 'fully funded', 'free', 'scholarship', 'grant', 'stipend', 'fellowship', 'financial aid', 'all expenses'];
@@ -38,11 +41,25 @@ const CONTROLLED_VALUES = {
 const PORTUGUESE_TEXT_FIELDS = new Set(['description', 'location', 'cost', 'language', 'eligibility', 'process', 'applicants', 'additionals', 'keywords', 'qualification_reason']);
 const ENGLISH_CATALOG_PATTERN = /\b(?:application fee|participation fee|per project|per participant|fully funded|high school|undergraduate|graduate students?|applications?|registration|eligible|eligibility|deadline|in-person|online only|short film|speech|coding|entrepreneurship|scholarships?|fees?|free|USA)\b/i;
 const QUALIFICATION_VERDICTS = new Set(['qualified', 'unqualified', 'uncertain']);
-const BRAZIL_REACH_PATTERN = /\b(?:brasil|brazil|brasileir[oa]s?|brazilian|international students?|internationally|all nationalities|any nationality|all countries|any country|worldwide|global(?:ly)?|from every country|from around the world|qualquer nacionalidade|todas as nacionalidades|qualquer pais|todos os paises|mundo inteiro)\b/i;
+// Caso real que expôs a lacuna: dossiê do Ross/USA Program citou "Ross
+// participants come from all over the United States, and from several other
+// countries" (literal, confiabilidade 4/5) — prova real de alcance
+// internacional, mas rebaixada pra "uncertain" porque não batia com nenhuma
+// palavra da lista. A mesma página tinha uma frase mais direta ("Do you
+// accept international students?") que bateria, mas o modelo citou a outra.
+// Em vez de depender só de o modelo escolher a frase "ideal", a lista
+// também reconhece esse jeito comum de descrever alcance internacional sem
+// usar a palavra "international" (contagem de países, em vez de nome).
+const BRAZIL_REACH_PATTERN = /\b(?:brasil|brazil|brasileir[oa]s?|brazilian|international students?|internationally|all nationalities|any nationality|all countries|any country|worldwide|global(?:ly)?|from every country|from around the world|(?:other|several|many|various|numerous|\d+|over \d+) (?:other )?countries|hosted? students? from|come from .{0,40}countries|qualquer nacionalidade|todas as nacionalidades|qualquer pais|todos os paises|mundo inteiro|outros paises|varios paises|diversos paises|diferentes paises)\b/i;
 const BRAZIL_LOCAL_REACH_PATTERN = /\b(?:acre|acrean[oa]s?|alagoas|alagoan[oa]s?|amapa|amapaense?s?|amazonas|amazonense?s?|bahia|baian[oa]s?|ceara|cearense?s?|distrito federal|brasiliense?s?|espirito santo|capixaba?s?|goias|goian[oa]s?|maranhao|maranhense?s?|mato grosso(?: do sul)?|mato-grossense?s?|sul-mato-grossense?s?|minas gerais|mineir[oa]s?|(?:estado do|no|do) para|paraense?s?|paraiba|paraiban[oa]s?|parana|paranaense?s?|pernambuco|pernambucan[oa]s?|piaui|piauiense?s?|rio de janeiro|fluminense?s?|carioca?s?|rio grande do norte|potiguar(?:es)?|rio grande do sul|gauch[oa]s?|rondonia|rondoniense?s?|roraima|roraimense?s?|santa catarina|catarinense?s?|sao paulo|paulista?s?|sergipe|sergipan[oa]s?|tocantins|tocantinense?s?)\b/i;
 const YOUTH_PARTICIPATION_PATTERN = /\b(?:youth|young people|young person|student|students|school|college|university|undergraduate|teen|adolesc|jovens?|juventude|estudantes?|alun[oa]s?|universitari[oa]s?|graduand[oa]s?|ensino|escola|matriculad[oa]s?)\b/i;
-const POSITIVE_PARTICIPATION_PATTERN = /\b(?:may apply|can apply|eligible|open to|accepted|participate|participation|enrolled|must be enrolled|podem? (?:se )?(?:inscrever|candidatar|participar)|elegive(?:l|is)|abert[oa]s? a|aceita (?:candidaturas|inscricoes|participantes)|matriculad[oa]s?|estar (?:matriculad[oa]|cursando)|precisa estar)\b/i;
-const PARTICIPATION_EXCLUSION_PATTERN = /\b(?:only|exclusiv(?:e|ely|amente|os?|as?)|must be (?:a |an )?(?:citizen|resident|national)|citizens? or residents? of|open only to|not eligible|cannot apply|ineligible|somente|apenas|exclusiv[oa]s?|deve ser (?:cidad[aã]o|residente)|n[aã]o (?:pode|podem|eleg[ií]vel|aceita))\b/i;
+// Caso real: AI Civic Action Accelerator 2026 tinha "Applicant(s) must live
+// in the United States or are US citizens or permanent residents living
+// abroad" — nenhuma das frases antigas ("must be a citizen", "citizens or
+// residents of") batia com esse jeito de escrever (verbo "live in", e
+// "permanent residents" sem "of" logo depois). Adicionadas variações comuns
+// de restrição por residência/cidadania dos EUA (ou de qualquer país).
+const PARTICIPATION_EXCLUSION_PATTERN = /\b(?:only|exclusiv(?:e|ely|amente|os?|as?)|must be (?:a |an )?(?:citizen|resident|national)|must (?:live|reside) in|permanent residents?|citizens? or (?:permanent )?residents?( of)?|citizens? and residents? of|open only to|not eligible|cannot apply|ineligible|somente|apenas|exclusiv[oa]s?|deve ser (?:cidad[aã]o|residente)|n[aã]o (?:pode|podem|eleg[ií]vel|aceita))\b/i;
 const BRAZIL_EXCLUSION_PATTERN = /\b(?:brazil(?:ian)?|brasil(?:eir[oa]s?)?).{0,80}\b(?:not eligible|cannot apply|ineligible|excluded|nao (?:pode|podem|e elegivel|sao elegiveis)|excluid[oa]s?)\b|\b(?:not eligible|cannot apply|ineligible|excluded|nao (?:pode|podem|e elegivel|sao elegiveis)|excluid[oa]s?).{0,80}\b(?:brazil(?:ian)?|brasil(?:eir[oa]s?)?)\b|\b(?:except|excluding|exceto|menos)\s+(?:o\s+)?(?:brazil|brasil)\b/i;
 const TAG_EXCLUSIONS = new Set([
   'sentinel', 'remoto', 'online', 'presencial', 'hibrido', 'híbrido', 'ingles', 'inglês', 'portugues', 'português', 'espanhol',
@@ -91,7 +108,7 @@ async function authorize(req, supabase) {
 }
 
 const emptyMetrics = () => ({ modelCalls: 0, pageFetches: 0, inputTokens: 0, outputTokens: 0 });
-function addMetrics(...items) {
+export function addMetrics(...items) {
   return items.reduce((total, item) => ({
     modelCalls: total.modelCalls + Number(item?.modelCalls || 0),
     pageFetches: total.pageFetches + Number(item?.pageFetches || 0),
@@ -100,7 +117,7 @@ function addMetrics(...items) {
   }), emptyMetrics());
 }
 
-async function createRun(supabase, user, runType, requestedCount, metadata = {}) {
+export async function createRun(supabase, user, runType, requestedCount, metadata = {}) {
   const { data, error } = await supabase.from('sentinel_research_runs').insert({
     run_type: runType,
     requested_count: requestedCount,
@@ -113,13 +130,13 @@ async function createRun(supabase, user, runType, requestedCount, metadata = {})
   return data;
 }
 
-async function updateRun(supabase, runId, patch) {
+export async function updateRun(supabase, runId, patch) {
   const { data, error } = await supabase.from('sentinel_research_runs').update(patch).eq('id', runId).select().single();
   if (error) throw error;
   return data;
 }
 
-async function finalizeRun(supabase, runId, result, metrics, fatalError = null) {
+export async function finalizeRun(supabase, runId, result, metrics, fatalError = null) {
   return updateRun(supabase, runId, {
     status: fatalError ? 'failed' : (result.failed > 0 ? 'partial' : 'completed'),
     processed_count: result.processed,
@@ -146,11 +163,26 @@ function scorePost(post) {
 }
 
 export function discoveryScreeningStatus(score) {
-  // Caption signals only order the queue. Qualification is decided after source research.
+  // A triagem por score agora acontece ANTES de inserir a linha (ver
+  // runDiscovery: score < MIN_DISCOVERY_SCORE nunca chega a virar uma linha
+  // em sentinel_posts). Toda linha que chega aqui já passou nesse corte, então
+  // sempre entra na fila — isso só ordena, não filtra mais nada.
   return 'queued';
 }
 
-async function activeOpportunityTagNames(supabase) {
+// Contas de Instagram ativas (tabela sentinel_instagram_accounts, editável
+// por Admin/Editor na tela do Sentinel). Lista vazia = Instagram desligado:
+// runDiscovery pula a etapa inteira, sem chamar a Apify.
+export async function activeInstagramAccounts(supabase) {
+  const { data, error } = await supabase.from('sentinel_instagram_accounts').select('username').eq('active', true).order('username');
+  if (error) {
+    console.warn('[sentinel] não foi possível carregar as contas de Instagram:', error.message);
+    return [];
+  }
+  return (data || []).map((row) => String(row.username || '').trim()).filter(Boolean);
+}
+
+export async function activeOpportunityTagNames(supabase) {
   const { data, error } = await supabase.from('opportunity_tags').select('name').eq('active', true)
     .order('category').order('sort_order').order('name');
   if (error) {
@@ -165,9 +197,16 @@ function extractUrl(value) {
 }
 
 const TRACKING_PARAMS = /^(?:utm_.+|fbclid|gclid|mc_cid|mc_eid|ref|referrer|source)$/i;
+// Palavras que aparecem em variações do MESMO título sem mudar do que se
+// trata ("Programa X" vs "X Program" vs "The X Scholarship") — tiradas antes
+// de comparar, pra não contarem como diferença real.
 const DISCOVERY_TITLE_NOISE = new Set([
   'apply', 'application', 'applications', 'conference', 'funded', 'fully', 'now',
-  'open', 'opportunity', 'program', 'programme', 'scholarship',
+  'open', 'opportunity', 'program', 'programme', 'programa', 'scholarship', 'bolsa',
+  'the', 'a', 'an', 'of', 'for', 'in', 'on', 'at', 'to', 'and', 'with', 'by', 'from',
+  'official', 'oficial', 'international', 'internacional', 'global', 'national', 'nacional',
+  'e', 'de', 'da', 'do', 'das', 'dos', 'no', 'na', 'nos', 'nas', 'um', 'uma', 'uns', 'umas',
+  'com', 'para', 'por', 'em', 'ao', 'aos',
 ]);
 
 export function canonicalizeOpportunityUrl(value) {
@@ -197,6 +236,21 @@ export function opportunityDiscoveryKey(link, title) {
   return `${canonicalizeOpportunityUrl(link)}|${discoveryTitleTokens(title).join(' ')}`;
 }
 
+// O "código leve e reproduzível" pra reconhecer a mesma oportunidade no
+// futuro (pedido do usuário) é simplesmente o domínio registrável do link
+// oficial — barato de calcular, igual pra sempre que vier da mesma
+// organização, e não depende do título vir escrito igual (nem da URL exata
+// da página, que muda de edição pra edição: /2026/inscricoes vs /2027/apply).
+export function registrableDomain(value) {
+  try {
+    const host = comparableHost(new URL(String(value || '').trim()).hostname);
+    const parts = host.split('.').filter(Boolean);
+    return parts.length > 2 ? parts.slice(-2).join('.') : host;
+  } catch {
+    return '';
+  }
+}
+
 export function discoveryTitleSimilarity(left, right) {
   const a = new Set(discoveryTitleTokens(left));
   const b = new Set(discoveryTitleTokens(right));
@@ -205,13 +259,60 @@ export function discoveryTitleSimilarity(left, right) {
   return intersection / Math.min(a.size, b.size);
 }
 
+// Ano do título ("... 2026", "... 2027"): NÃO decide se é duplicata — só
+// serve pra saber se o conteúdo precisa ser revalidado. "AI Civic Action
+// Accelerator 2026" e "...2027" são a MESMA oportunidade (mesmo programa),
+// só que numa edição mais nova — o certo é achar a linha antiga no catálogo
+// e mandar o conteúdo dela pra revisão de novo (prazo, elegibilidade etc.
+// mudam a cada edição), em vez de criar uma linha nova do zero.
+function titleYear(value) {
+  return String(value || '').match(/\b(20\d{2})\b/)?.[0] || null;
+}
+
+// true quando `extracted` é uma edição mais nova do mesmo programa que já
+// existe no catálogo como `candidate` (mesmo título-base, ano maior).
+export function isNewerEdition(candidate, extracted) {
+  const candidateYear = Number(titleYear(candidate?.title));
+  const extractedYear = Number(titleYear(extracted?.title));
+  return Boolean(candidateYear && extractedYear && extractedYear > candidateYear);
+}
+
+// A "fórmula" pedida pelo usuário: um código leve, calculado só a partir do
+// título (sem depender do link, que pode mudar de domínio de uma fonte pra
+// outra — mirror, agregador, site oficial vs. terceiro). Tira palavras de
+// preenchimento (artigos, preposições, "program"/"official" etc.) e o ano,
+// ordena os tokens que sobraram e junta — assim "The Ross Program" e
+// "Programa Ross (Ross Program)" caem na mesma fórmula, mesmo vindo de sites
+// diferentes.
+export function titleFingerprint(value) {
+  return discoveryTitleTokens(value)
+    .filter((token) => !/^20\d{2}$/.test(token))
+    .filter((token, index, all) => all.indexOf(token) === index)
+    .sort()
+    .join(' ');
+}
+
 export function isDuplicateOpportunity(candidate, extracted) {
+  const candidateFingerprint = titleFingerprint(candidate?.title);
+  const extractedFingerprint = titleFingerprint(extracted.title);
+  if (candidateFingerprint && candidateFingerprint === extractedFingerprint) return true;
+
   const sameKey = candidate?.sentinel_discovery_key
     && candidate.sentinel_discovery_key === opportunityDiscoveryKey(extracted.link, extracted.title);
   if (sameKey) return true;
+
   const similarity = discoveryTitleSimilarity(candidate?.title, extracted.title);
   const sameUrl = canonicalizeOpportunityUrl(candidate?.link) === canonicalizeOpportunityUrl(extracted.link);
-  return (sameUrl && similarity >= 0.72) || (similarity === 1 && discoveryTitleTokens(extracted.title).length >= 4);
+  const candidateDomain = registrableDomain(candidate?.link);
+  const sameDomain = candidateDomain && candidateDomain === registrableDomain(extracted.link);
+  // Link/domínio ainda contam quando batem (reforçam a decisão), mas não são
+  // mais obrigatórios: título muito parecido sozinho (>=0.85) já basta,
+  // porque a mesma oportunidade pode chegar por um mirror, agregador ou o
+  // site oficial — o link muda, o nome do programa não.
+  return (sameUrl && similarity >= 0.72)
+    || (similarity === 1 && discoveryTitleTokens(extracted.title).length >= 4)
+    || (sameDomain && similarity >= 0.4)
+    || similarity >= 0.85;
 }
 
 function decodeHtmlEntities(value) {
@@ -239,11 +340,37 @@ const ADJACENT_LINK_SIGNALS = [
   ['inscri', 10], ['prazo', 12], ['edital', 9], ['rules', 7], ['regulamento', 7],
   ['important dates', 9], ['timeline', 8], ['calendar', 6], ['faq', 5], ['eligibility', 5],
   ['guidelines', 8], ['guide', 6], ['news', 4], ['resources', 3], ['schedule', 3],
+  // Caso real: promys.org tem uma página dedicada
+  // "/for-international-students/" que nunca era priorizada — sem nenhuma
+  // palavra da lista batendo no texto do link, ela ficava com signalScore=0 e
+  // dependia só do path bater (nem sempre bate), então a pesquisa terminava
+  // sem citar essa página e o veredito caía pra "uncertain" por falta de
+  // evidência, mesmo o programa aceitando estudantes internacionais.
+  ['international', 12], ['internacional', 12], ['non-us', 8], ['overseas', 8], ['worldwide', 9],
+  ['who can apply', 9], ['who is eligible', 9], ['quem pode participar', 9], ['estrangeiro', 9],
 ];
-const ADJACENT_LINK_BLOCKLIST = /(?:privacy|cookie|terms|login|sign[ -]?in|donate|sponsor|facebook|instagram|linkedin|youtube|mailto:|javascript:)/i;
+// Caso real: AI Civic Action Accelerator 2026 — a página fonte tinha botões
+// de compartilhar (Reddit, Twitter/X, Pinterest, WhatsApp, Telegram) cujos
+// links de verdade são coisas como "reddit.com/submit?url=..." ou
+// "twitter.com/intent/tweet?text=...". Eles passavam pela lista de bloqueio
+// (que só olhava pro DOMÍNIO da rede social, tipo facebook.com/instagram.com)
+// e "comiam" vagas preciosas de MAX_ADJACENT_PAGES (só 8) — deixando a
+// pesquisa sem espaço pra ler a página real de elegibilidade.
+const ADJACENT_LINK_BLOCKLIST = /(?:privacy|cookie|terms|login|sign[ -]?in|donate|sponsor|facebook|instagram|linkedin|youtube|mailto:|javascript:|reddit\.com\/submit|twitter\.com\/intent|x\.com\/intent|pinterest\.[a-z.]+\/pin\/create|api\.whatsapp\.com\/send|telegram\.me\/share|t\.me\/share|\/share\?url=|sharer\.php)/i;
 const ADJACENT_EVENT_PENALTY = /(?:will be held|takes place|event date|tournament day|logistics|finals?\b)/i;
 const RESEARCH_TOKEN_STOPWORDS = new Set(['para', 'programa', 'program', 'project', 'projeto', 'edicao', 'edition', 'especial', 'official', 'oficial', 'index', 'http', 'https', '2024', '2025', '2026', '2027']);
 const ARCHIVE_LINK_PENALTY = /(?:edições?[-\s]+anteriores|edicoes?[-\s]+anteriores|archive|past[-\s]+editions?|resultados?|selecionad[oa]s?)/i;
+// Caso real: AI Civic Action Accelerator 2026 (opportunitiesforyouth.org)
+// puxou "apply-now-2026-horizon-fellowship..." — um post TOTALMENTE diferente
+// no mesmo blog — pra dentro da pesquisa, só porque a palavra "application"
+// aparecia no título (bate com o sinal genérico "application", peso 10, que
+// sozinho já passava do corte de 9 pra ignorar a falta de tópico em comum).
+// Sites de notícias/oportunidades quase sempre usam uma URL no formato
+// /AAAA/MM/DD/titulo-do-post/ pra cada post — dois links nesse formato, no
+// mesmo site, sem nenhuma palavra do título em comum, são quase certamente
+// posts diferentes (não uma página de elegibilidade/FAQ, que não costuma
+// morar numa URL datada assim).
+const DATED_BLOG_POST_PATTERN = /^\/\d{4}\/\d{2}\/\d{2}\//;
 
 function comparableHost(hostname) {
   return String(hostname || '').toLowerCase().replace(/^www\./, '');
@@ -290,7 +417,7 @@ export function buildOpportunityResearchPlan(opportunity = {}) {
     { id: 'current_cycle', question: `Qual é a edição vigente de ${opportunity.title || 'esta oportunidade'} em ${year}?`, signals: [year, 'edição', 'inscrições abertas', 'notícia', 'announcement'] },
     { id: 'deadline_status', question: 'Quais são os prazos de candidatura e o estado atual das inscrições?', signals: ['prazo', 'inscrição', 'deadline', 'application', 'cronograma', 'calendar'] },
     { id: 'participation', question: 'Quem pode participar e quais condições realmente selecionam candidatos?', signals: ['requisitos', 'elegibilidade', 'quem pode participar', 'eligibility', 'rules', 'regulamento'] },
-    { id: 'brazilian_youth', question: 'Existe ao menos um grupo de jovens brasileiros que atende à elegibilidade, inclusive grupos restritos a um estado, cidade, escola, série ou idade?', signals: ['Brasil', 'Brazil', 'nacionalidade', 'estado', 'cidade', 'escola', 'matriculado', 'youth', 'jovens', 'students'] },
+    { id: 'brazilian_youth', question: 'Existe ao menos um grupo de jovens brasileiros que atende à elegibilidade, inclusive grupos restritos a um estado, cidade, escola, série ou idade?', signals: ['Brasil', 'Brazil', 'nacionalidade', 'estado', 'cidade', 'escola', 'matriculado', 'youth', 'jovens', 'students', 'international', 'internacional', 'estrangeiro', 'worldwide', 'who can apply'] },
     { id: 'application', question: 'Como funciona a candidatura e quais materiais ou etapas são exigidos?', signals: ['formulário', 'como participar', 'application', 'apply', 'documentos', 'processo'] },
     { id: 'logistics_support', question: 'Qual é o formato, local, custo, apoio e benefício oferecido?', signals: ['gratuito', 'custo', 'bolsa', 'prêmio', 'local', 'online', 'presencial', 'support'] },
   ];
@@ -331,6 +458,9 @@ export function extractAdjacentLinks(html, baseUrl, context = {}) {
       && basePathTokens.every((token) => normalizedTargetPath.includes(token));
     const pathScore = matchesBasePath ? (basePathTokens.length === 1 ? 10 : 7) : 0;
     const signalScore = ADJACENT_LINK_SIGNALS.reduce((total, [signal, weight]) => total + (searchable.includes(signal) ? weight : 0), 0);
+    const isUnrelatedDatedBlogPost = relatedHost && matchedTitleTokens === 0 && target.pathname !== base.pathname
+      && DATED_BLOG_POST_PATTERN.test(base.pathname) && DATED_BLOG_POST_PATTERN.test(target.pathname);
+    if (isUnrelatedDatedBlogPost) continue;
     if (relatedHost && basePathTokens.length && !matchesBasePath && matchedTitleTokens === 0 && signalScore < 9) continue;
     if (titleTokens.length > 1 && matchedTitleTokens > 0 && matchedTitleTokens < titleTokens.length && signalScore === 0 && pathScore === 0) continue;
     const yearScore = normalizedSearchable.includes(researchYear) && (matchedTitleTokens > 0 || signalScore > 0) ? 10 : 0;
@@ -459,6 +589,20 @@ export async function fetchResearchSources(url, opportunity = {}) {
     }
   };
   enqueue(primary.links, 1, primary.url);
+  // Caso real: espr.camp/program não menciona elegibilidade nem prazo — essa
+  // informação só existe em /faq (idade, nacionalidade "de qualquer país",
+  // custo) e possivelmente /apply (prazo). Um link de nav só com o texto
+  // "FAQ" tem pontuação baixa no descobridor de links (ADJACENT_LINK_SIGNALS)
+  // e pode nem aparecer no HTML se o menu for montado por JavaScript. Em vez
+  // de depender só de achar e pontuar esse link, tenta direto os caminhos
+  // mais comuns de FAQ/inscrição no mesmo domínio — se não existir, é só um
+  // 404 a mais na lista de falhas, sem custo real.
+  const deepDivePaths = ['/faq', '/faqs', '/frequently-asked-questions', '/apply', '/application', '/how-to-apply'];
+  const deepDiveGuesses = deepDivePaths
+    .map((path) => { try { return new URL(path, primary.url).href; } catch { return null; } })
+    .filter(Boolean)
+    .map((guessUrl) => ({ url: guessUrl, label: 'Página comum de FAQ/inscrição (tentativa direta)', score: 20 }));
+  enqueue(deepDiveGuesses, 1, primary.url);
   let pageFetches = primary.pageFetches;
   while (sources.length - 1 < MAX_ADJACENT_PAGES && queue.size) {
     const batch = [...queue.entries()]
@@ -529,7 +673,7 @@ function modelErrorMessage(error) {
   return String(error?.message || error || 'Falha desconhecida').slice(0, 500);
 }
 
-async function callModel(system, user, { maxTokens = 2048 } = {}) {
+export async function callModel(system, user, { maxTokens = 2048 } = {}) {
   const attempts = [];
   let metrics = emptyMetrics();
   for (const model of MODELS) {
@@ -665,7 +809,9 @@ ${allowedTags.length ? `- Vocabulário ativo permitido para keywords: ${allowedT
 QUALIDADE DO TEXTO:
 - Escreva para estudantes e famílias, em linguagem simples, direta e sem tom promocional.
 - title deve conter apenas o nome oficial. Remova chamadas como "apply now" e "fully funded" quando não fizerem parte do nome.
-- description deve explicar o que é a oportunidade, para quem é e o principal apoio oferecido em até 45 palavras e duas frases.
+- description deve dar ao estudante uma visão completa da oportunidade em texto corrido: o que é o programa, o tema e formato, o que ele oferece de fato (financiamento, mentoria, certificado, viagem, prêmio, publicação, networking etc.) e a duração/estrutura das atividades. Não é só uma frase-resumo: é o texto que substitui o estudante ter que ler a página oficial inteira pra entender do que se trata.
+- Não repita em description o que já pertence a outro campo: regras de quem pode participar (isso é eligibility), passos de inscrição (isso é process), prazo, custo ou local exatos (campos próprios) — cite o benefício ou formato, não o procedimento.
+- Sem limite rígido de palavras: normalmente fica entre 60 e 150 palavras em 3 a 6 frases, e pode passar disso se a oportunidade tiver várias fases, categorias ou modalidades que o estudante precisa entender antes de decidir se candidatar. Curto demais (uma frase genérica) é considerado incompleto.
 ${ELIGIBILITY_PROCESS_GUIDANCE}
 - applicants deve trazer somente dicas específicas e comprovadas pela fonte. Se houver apenas orientação genérica, use null.
 - additionals deve conter somente informação importante que não caiba nos outros campos. Não repita prazo, custo ou elegibilidade.
@@ -674,7 +820,7 @@ ${ELIGIBILITY_PROCESS_GUIDANCE}
 Cada campo preenchido deve ter evidence com citação literal e a URL exata da página onde o trecho foi encontrado. Se veio de inscrições, regulamento ou outra página adjacente, use essa URL, não a página principal.
 
 Responda SOMENTE com JSON cru:
-{"title":"Nome oficial","description":"Programa para jovens que oferece formação e apoio.","link":"URL oficial","deadline":"4 de setembro de 2026","areas":["STEM"],"level":["Ensino Médio"],"location":"Remoto","cost":"Gratuito","language":"Inglês","keywords":["Inovação social","Gestão de projetos","Liderança"],"eligibility":"Estar matriculado","process":"Preencha o formulário. Anexe os documentos solicitados. Envie a candidatura.","applicants":null,"additionals":null,"type":"Programas Acadêmicos","evidence":{"deadline":{"quote":"Applications close on September 4, 2026","source_url":"https://example.org/apply","kind":"application_deadline"}}}`;
+{"title":"Nome oficial","description":"Programa de verão de seis semanas nos Estados Unidos voltado a estudantes interessados em ciência de dados aplicada a problemas sociais. Combina oficinas técnicas com profissionais da área, um projeto em grupo desenvolvido ao longo do programa e mentoria individual até a apresentação final. Hospedagem, alimentação e material didático são cobertos pela organização, e os participantes recebem certificado internacional de conclusão.","link":"URL oficial","deadline":"4 de setembro de 2026","areas":["STEM"],"level":["Ensino Médio"],"location":"Remoto","cost":"Gratuito","language":"Inglês","keywords":["Inovação social","Gestão de projetos","Liderança"],"eligibility":"Estar matriculado","process":"Preencha o formulário. Anexe os documentos solicitados. Envie a candidatura.","applicants":null,"additionals":null,"type":"Programas Acadêmicos","evidence":{"deadline":{"quote":"Applications close on September 4, 2026","source_url":"https://example.org/apply","kind":"application_deadline"}}}`;
 }
 
 export function normalizeDiscoveryResult(parsed, research, fallbackUrl, allowedTags = []) {
@@ -744,10 +890,10 @@ async function groundUrl(url, caption = '', ownerUsername = '', manual = false, 
     });
     const { research, brief } = dossier;
     metrics = dossier.metrics;
-    if (brief.qualification.verdict !== 'qualified') {
+    if (brief.qualification.verdict === 'unqualified') {
       return {
         result: null,
-        rejectionReason: brief.qualification.reason || 'As fontes não comprovam que jovens brasileiros podem participar.',
+        rejectionReason: brief.qualification.reason || 'As fontes indicam que jovens brasileiros não podem participar.',
         evidence: { _qualification: brief.qualification },
         validationNotes: [`qualification: ${brief.qualification.verdict}`],
         metrics,
@@ -763,6 +909,10 @@ async function groundUrl(url, caption = '', ownerUsername = '', manual = false, 
         },
       };
     }
+    // "uncertain" não é mais descartado aqui: sem prova clara de exclusão,
+    // seguimos para montar a entrada do catálogo e a salvamos como pendente
+    // de revisão manual (ver qualification_status abaixo), em vez de perder
+    // a oportunidade silenciosamente no log do Sentinel.
     let response = await callStructuredModel(
       discoveryPrompt(manual, allowedTags),
       `DOSSIÊ FACTUAL VALIDADO:\n${JSON.stringify(brief)}\n\nFONTES COMPLETAS:\n${sourcesForPrompt(research.sources)}\n\nRetorne o JSON do catálogo agora.`,
@@ -784,9 +934,13 @@ async function groundUrl(url, caption = '', ownerUsername = '', manual = false, 
       }
     }
     if (normalized.result) {
-      normalized.result.qualification_status = 'qualified';
-      normalized.result.qualification_reason = brief.qualification.reason || 'As fontes comprovam participação de jovens brasileiros.';
+      const qualified = brief.qualification.verdict === 'qualified';
+      normalized.result.qualification_status = qualified ? 'qualified' : 'pending';
+      normalized.result.qualification_reason = qualified
+        ? (brief.qualification.reason || 'As fontes comprovam participação de jovens brasileiros.')
+        : (brief.qualification.reason || 'A pesquisa não comprovou com certeza que jovens brasileiros podem participar; revise as fontes antes de aprovar.');
       normalized.evidence._qualification = brief.qualification;
+      if (!qualified) normalized.validationNotes.push(`qualification: ${brief.qualification.verdict} — salva como pendente para revisão manual`);
     }
     return {
       ...normalized,
@@ -821,7 +975,39 @@ async function findOrCreateOpportunity(supabase, extracted) {
   const { data: candidates, error: candidatesError } = await supabase.from('opportunities').select('*').not('link', 'is', null);
   if (candidatesError) throw candidatesError;
   const existing = (candidates || []).find((candidate) => isDuplicateOpportunity(candidate, extracted));
-  if (existing) return { opportunity: existing, created: false, duplicateReason: 'Mesmo link oficial e nome equivalente.' };
+  if (existing) {
+    if (isNewerEdition(existing, extracted)) {
+      // Mesmo programa, edição mais nova (ano maior no título): não cria
+      // linha nova — atualiza a oportunidade antiga com o que a pesquisa
+      // achou agora (prazo, elegibilidade, link etc. mudam a cada edição) e
+      // manda de volta pra revisão, porque quem decide se o conteúdo novo
+      // está certo é sempre uma pessoa.
+      const refreshed = {
+        title: extracted.title || existing.title,
+        description: extracted.description || existing.description,
+        link: canonicalizeOpportunityUrl(extracted.link) || existing.link,
+        deadline: extracted.deadline || null,
+        areas: extracted.areas?.length ? extracted.areas : existing.areas,
+        level: extracted.level?.length ? extracted.level : existing.level,
+        location: extracted.location || existing.location,
+        cost: extracted.cost || existing.cost,
+        language: extracted.language || existing.language,
+        keywords: extracted.keywords?.length ? normalizeKeywordTags(extracted.keywords) : existing.keywords,
+        eligibility: Array.isArray(extracted.eligibility) ? extracted.eligibility.join('\n') : (extracted.eligibility || existing.eligibility),
+        process: extracted.process || existing.process,
+        applicants: extracted.applicants || existing.applicants,
+        additionals: extracted.additionals || existing.additionals,
+        status: 'Revisar',
+        qualification_status: extracted.qualification_status === 'qualified' ? 'qualified' : 'pending',
+        qualification_reason: extracted.qualification_reason || existing.qualification_reason,
+        sentinel_discovery_key: discoveryKey,
+      };
+      const { data: updated, error: updateError } = await supabase.from('opportunities').update(refreshed).eq('id', existing.id).select().single();
+      if (updateError) throw updateError;
+      return { opportunity: updated, created: false, duplicateReason: `Nova edição encontrada (${titleYear(extracted.title)}) — conteúdo atualizado, revise antes de aprovar.` };
+    }
+    return { opportunity: existing, created: false, duplicateReason: 'Mesmo link oficial e nome equivalente.' };
+  }
 
   const row = {
     title: extracted.title, description: extracted.description || '', link: canonicalizeOpportunityUrl(extracted.link),
@@ -830,8 +1016,15 @@ async function findOrCreateOpportunity(supabase, extracted) {
     eligibility: Array.isArray(extracted.eligibility) ? extracted.eligibility.join('\n') : String(extracted.eligibility || ''),
     process: extracted.process || null, applicants: extracted.applicants || null,
     additionals: extracted.additionals || null,
-    resources: [], status: extracted.status === 'Encerrada' ? 'Encerrada' : 'Revisar', review: null, type: extracted.type || 'Programas Acadêmicos',
-    qualification_status: 'qualified', qualification_reason: extracted.qualification_reason || null,
+    // Oportunidades novas SEMPRE entram em revisão humana, mesmo quando o
+    // Sentinel já suspeita que o prazo passou (extracted.status === 'Encerrada').
+    // Antes isso pulava a fila de revisão direto — se a leitura do prazo
+    // estivesse errada, ninguém nunca via a oportunidade pra corrigir. O campo
+    // deadline continua preenchido com o que o Sentinel encontrou, então quem
+    // revisa já vê o prazo suspeito e decide se fecha ou corrige.
+    resources: [], status: 'Revisar', review: null, type: extracted.type || 'Programas Acadêmicos',
+    qualification_status: extracted.qualification_status === 'qualified' ? 'qualified' : 'pending',
+    qualification_reason: extracted.qualification_reason || null,
     sentinel_discovery_key: discoveryKey,
   };
   const { data, error } = await supabase.from('opportunities').insert(row).select().single();
@@ -848,7 +1041,7 @@ async function updatePost(supabase, sourceUrl, patch) {
   if (error) throw error;
 }
 
-async function processPost(supabase, post, runId, manual = false, allowedTags = []) {
+export async function processPost(supabase, post, runId, manual = false, allowedTags = []) {
   const sourceUrl = manual ? post.url : post.sourceUrl;
   const officialUrl = manual ? post.url : extractUrl(post.caption);
   try {
@@ -903,11 +1096,24 @@ async function withConcurrency(items, limit, task) {
 }
 
 async function runDiscovery(supabase, maxCandidates, runId) {
+  const accounts = await activeInstagramAccounts(supabase);
+  if (!accounts.length) {
+    // Nenhuma conta ativa = Instagram "desligado". Não chama a Apify, não
+    // gasta nada, só registra a execução como vazia.
+    await updateRun(supabase, runId, { requested_count: 0, metadata: { scraped: 0, new_posts: 0, queued_remaining: 0, instagram_accounts: 0 } });
+    return {
+      response: {
+        scraped: 0, newPosts: 0, candidates: 0, qualified: 0, duplicates: 0, created: 0, rejected: 0, failed: 0, queued: 0,
+        skippedKnownOpportunity: 0, skippedLowScore: 0, instagramAccounts: 0,
+      },
+      metrics: emptyMetrics(),
+    };
+  }
   if (!process.env.APIFY_API_KEY) throw new Error('APIFY_API_KEY não configurada no servidor.');
   const client = new ApifyClient({ token: process.env.APIFY_API_KEY });
   const actorRun = await client.actor('apify/instagram-scraper').call({
     addParentData: false,
-    directUrls: SOURCE_ACCOUNTS.map((account) => `https://www.instagram.com/${account}/`),
+    directUrls: accounts.map((account) => `https://www.instagram.com/${account}/`),
     onlyPostsNewerThan: '15 days', resultsLimit: 50, resultsType: 'posts', searchLimit: 1, searchType: 'hashtag',
   });
   const { items } = await client.dataset(actorRun.defaultDatasetId).listItems();
@@ -918,7 +1124,50 @@ async function runDiscovery(supabase, maxCandidates, runId) {
   if (knownError) throw knownError;
   const known = new Set((knownRows || []).map((row) => row.source_url));
   const fresh = posts.filter((post) => !known.has(post.sourceUrl));
-  const scored = fresh.map((post) => ({ ...post, score: scorePost(post) }));
+
+  // Triagem barata (sem IA, sem fetch de página) ANTES de gravar qualquer
+  // coisa em sentinel_posts — mesma filosofia que os scrapers de site já
+  // usam em coletarCandidatos (api/cron/scrape-sources.js), adaptada pra
+  // legenda de Instagram (texto livre, não um título limpo):
+  //
+  //   1. Já existe algo muito parecido no catálogo? Compara os tokens do
+  //      título de cada oportunidade já cadastrada contra a legenda inteira
+  //      (discoveryTitleSimilarity, a mesma função que já protege contra
+  //      duplicata depois da pesquisa). Só descarta aqui quando TODOS os
+  //      tokens do título existente aparecem na legenda E esse título tem
+  //      pelo menos 4 tokens — o mesmo critério conservador que o dedup
+  //      final usa quando não há URL pra comparar. Prefere deixar passar um
+  //      duvidoso (custa uma pesquisa a mais) a esconder uma oportunidade
+  //      nova por engano.
+  //   2. O coeficiente de relevância (scorePost) é negativo demais? Abaixo
+  //      de MIN_DISCOVERY_SCORE a linha nem é criada — não fica "rejeitada"
+  //      poluindo o histórico, simplesmente nunca existiu.
+  //
+  // Os dois cortes rodam só uma vez por execução, em memória — nenhuma
+  // chamada extra de rede além da leitura de `title` já feita abaixo.
+  const { data: opsExistentes, error: opsError } = await supabase.from('opportunities').select('title').not('title', 'is', null);
+  if (opsError) throw opsError;
+  const titulosConhecidos = (opsExistentes || []).map((row) => row.title).filter(Boolean);
+  const jaEstaNoCatalogo = (caption, tituloJaAceitoNestaRodada) => {
+    const candidatos = [...titulosConhecidos, ...tituloJaAceitoNestaRodada];
+    return candidatos.some((titulo) => {
+      const tokens = discoveryTitleTokens(titulo);
+      return tokens.length >= 4 && discoveryTitleSimilarity(titulo, caption) === 1;
+    });
+  };
+
+  const tituloJaAceitoNestaRodada = [];
+  let skippedKnownOpportunity = 0;
+  let skippedLowScore = 0;
+  const scored = [];
+  for (const post of fresh) {
+    if (jaEstaNoCatalogo(post.caption, tituloJaAceitoNestaRodada)) { skippedKnownOpportunity += 1; continue; }
+    const score = scorePost(post);
+    if (score < MIN_DISCOVERY_SCORE) { skippedLowScore += 1; continue; }
+    tituloJaAceitoNestaRodada.push(post.caption);
+    scored.push({ ...post, score });
+  }
+
   if (scored.length) {
     const { error } = await supabase.from('sentinel_posts').insert(scored.map((post) => ({
       source_url: post.sourceUrl, source_type: 'instagram', owner_username: post.ownerUsername,
@@ -952,7 +1201,13 @@ async function runDiscovery(supabase, maxCandidates, runId) {
     timestamp: row.posted_at, score: row.score,
   }));
   const { count: queuedRemaining } = await supabase.from('sentinel_posts').select('id', { count: 'exact', head: true }).eq('status', 'queued');
-  await updateRun(supabase, runId, { requested_count: candidates.length, metadata: { scraped: posts.length, new_posts: fresh.length, queued_remaining: queuedRemaining || 0 } });
+  await updateRun(supabase, runId, {
+    requested_count: candidates.length,
+    metadata: {
+      scraped: posts.length, new_posts: fresh.length, queued_remaining: queuedRemaining || 0,
+      skipped_known_opportunity: skippedKnownOpportunity, skipped_low_score: skippedLowScore, instagram_accounts: accounts.length,
+    },
+  });
   const allowedTags = await activeOpportunityTagNames(supabase);
   const results = await withConcurrency(candidates, 3, (post) => processPost(supabase, post, runId, false, allowedTags));
   const metrics = addMetrics(...results.map((item) => item.metrics));
@@ -965,6 +1220,7 @@ async function runDiscovery(supabase, maxCandidates, runId) {
       rejected: results.filter((item) => item.status === 'rejected').length,
       failed: results.filter((item) => item.status === 'failed').length,
       queued: queuedRemaining || 0,
+      skippedKnownOpportunity, skippedLowScore, instagramAccounts: accounts.length,
     },
     metrics,
   };
@@ -1006,7 +1262,7 @@ QUALIDADE DO TEXTO:
 - Faça uma checagem explícita de todos os campos permitidos antes de responder. Corrija também valores existentes que sejam promocionais, desatualizados, não comprovados ou estejam no campo errado; não se limite ao deadline.
 - Se o link atual for uma página lateral, de prêmio ou arquivo e a pesquisa encontrar a página oficial de candidatura/submissão, atualize link para essa página operacional.
 - title deve conter apenas o nome oficial, sem chamadas promocionais.
-- description deve explicar o que é, para quem é e o principal apoio em até 45 palavras e duas frases.
+- description deve dar ao estudante uma visão completa da oportunidade em texto corrido: o que é o programa, tema e formato, o que ele oferece de fato (financiamento, mentoria, certificado, viagem, prêmio, publicação, networking etc.) e a duração/estrutura das atividades — sem repetir regras de elegibilidade, passos de inscrição, prazo, custo ou local, que já têm campo próprio. Sem limite rígido de palavras (normalmente 60 a 150, em 3 a 6 frases); se a description atual for uma frase genérica e curta demais para dar essa visão completa, proponha uma versão mais rica.
 ${ELIGIBILITY_PROCESS_GUIDANCE}
 - Ao revisar eligibility existente, proponha sua limpeza quando ele repetir outros campos, estiver abstrato ou trouxer itens que não sejam critérios de elegibilidade, mesmo que as informações estejam corretas.
 - applicants deve trazer somente dicas específicas comprovadas pela fonte; se forem genéricas, use null.
@@ -1028,7 +1284,17 @@ ${JSON.stringify(Object.fromEntries(MODEL_REVIEW_FIELDS.map((field) => [field, o
 export function catalogCoverageFields(opportunity = {}, updates = {}, allowedTags = []) {
   const fields = [];
   const missing = (field) => !Object.prototype.hasOwnProperty.call(updates, field);
-  if (missing('description') && String(opportunity.description || '').trim().split(/\s+/).filter(Boolean).length > 45) fields.push('description');
+  // Antes isso marcava description pra revisão quando ela passava de 45
+  // palavras (o antigo teto). Agora o objetivo é o oposto: description deve
+  // ser rica o bastante pra contar tudo que o estudante precisa saber, então
+  // o gatilho principal é o texto ser curto demais (abaixo do piso
+  // esperado). Mantido também o sinal de texto degenerado/repetitivo (poucas
+  // palavras únicas), que pega lixo tipo placeholder mesmo que "comprido".
+  const descriptionWords = String(opportunity.description || '').trim().split(/\s+/).filter(Boolean);
+  const descriptionUniqueRatio = descriptionWords.length ? new Set(descriptionWords.map((w) => w.toLowerCase())).size / descriptionWords.length : 1;
+  const descriptionTooThin = descriptionWords.length < 40;
+  const descriptionDegenerate = descriptionWords.length >= 10 && descriptionUniqueRatio < 0.4;
+  if (missing('description') && (descriptionTooThin || descriptionDegenerate)) fields.push('description');
   if (missing('language') && !String(opportunity.language || '').trim()) fields.push('language');
   const keywordCandidate = missing('keywords') ? (opportunity.keywords || []) : updates.keywords;
   const normalizedKeywords = normalizeKeywordTags(keywordCandidate, allowedTags);
@@ -1135,10 +1401,22 @@ export function normalizeQualification(rawQualification, sources = []) {
   const combined = normalizedText(evidence.map((item) => item.quote).join(' '));
   let verdict = QUALIFICATION_VERDICTS.has(requested) ? requested : 'uncertain';
   if (!evidence.length) verdict = 'uncertain';
+  // Antes exigíamos também POSITIVE_PARTICIPATION_PATTERN (uma palavra tipo
+  // "eligible"/"open to"/"participate" na MESMA citação) — mas isso rejeitava
+  // repetidamente citações reais que já combinam alcance + público jovem sem
+  // usar uma dessas palavras específicas: "students from around the world are
+  // welcome" (Euler Circle) e "Young people aged 18 to 30 from any country"
+  // (Young Feminist AI School) foram os dois casos que expuseram o problema —
+  // ambos comprovam elegibilidade claramente, só que com frases diferentes.
+  // reach + youth já É a descrição de quem pode participar; a garantia contra
+  // falso-positivo passa a ser PARTICIPATION_EXCLUSION_PATTERN (any sinal de
+  // "only"/"exclusively"/"must be a citizen of" na citação invalida mesmo
+  // com reach+youth presentes — cobre o caso "international students, mas só
+  // os já matriculados numa universidade americana").
   if (verdict === 'qualified' && !((BRAZIL_REACH_PATTERN.test(combined) || BRAZIL_LOCAL_REACH_PATTERN.test(combined))
     && YOUTH_PARTICIPATION_PATTERN.test(combined)
-    && POSITIVE_PARTICIPATION_PATTERN.test(combined)
-    && !BRAZIL_EXCLUSION_PATTERN.test(combined))) verdict = 'uncertain';
+    && !BRAZIL_EXCLUSION_PATTERN.test(combined)
+    && !PARTICIPATION_EXCLUSION_PATTERN.test(combined))) verdict = 'uncertain';
   if (verdict === 'unqualified' && !PARTICIPATION_EXCLUSION_PATTERN.test(combined)) verdict = 'uncertain';
   const downgraded = verdict === 'uncertain' && requested !== 'uncertain';
   return {

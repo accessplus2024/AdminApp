@@ -33,7 +33,7 @@ const SUBS = {
   dashboard:     'Acompanhe e gerencie as oportunidades em um só lugar.',
   oportunidades: 'Crie, filtre, edite e publique as oportunidades visíveis para os estudantes.',
   revisao:       'Oportunidades aguardando aprovação antes de irem pro ar.',
-  sentinel:      'Encontre, filtre e pesquise oportunidades antes da revisão editorial.',
+  sentinel:      'Encontre oportunidades (Instagram + sites/fóruns), filtre e pesquise antes da revisão editorial.',
   newsletter:    'Monte edições com o catálogo e mantenha o histórico de cada oportunidade.',
   time:          'Gerencie quem tem acesso ao painel e suas permissões.',
 };

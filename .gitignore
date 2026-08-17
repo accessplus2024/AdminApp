@@ -9,3 +9,5 @@ package-lock.json
 skills-lock.json
 client_secret.json
 
+.vercel
+.env*

@@ -31,6 +31,7 @@ export default function Opportunities({ onOpen, onNew, onEdit, perms = {} }) {
                   <Badge variant={D.custoVariant[o.custo] || 'neutral'}>{o.custo}</Badge>
                   {o.nivel.map((n) => <Badge key={n} variant="neutral">{n}</Badge>)}
                   {o.qualificacao === 'unqualified' && <Badge variant="danger">Desqualificada</Badge>}
+                  {o.qualificacao === 'pending' && o.motivoQualificacao && <Badge variant="warning">Elegibilidade incerta</Badge>}
                   {availability !== OPPORTUNITY_AVAILABILITY.UNKNOWN && availability !== o.status && <Badge variant={availabilityVariant(o)} dot>{availability}</Badge>}
                 </div>
               </div>

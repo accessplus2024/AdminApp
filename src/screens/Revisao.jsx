@@ -48,6 +48,7 @@ export default function Revisao({ onOpen, onEdit, onApprove, perms = {} }) {
                   <Badge variant={D.tipoVariant[o.tipo] || 'neutral'}>{o.tipo}</Badge>
                   <Badge variant={D.custoVariant[o.custo] || 'neutral'}>{o.custo}</Badge>
                   {o.nivel.map((n) => <Badge key={n} variant="neutral">{n}</Badge>)}
+                  {o.qualificacao === 'pending' && o.motivoQualificacao && <Badge variant="warning">Elegibilidade incerta</Badge>}
                 </div>
               </div>
               <div className="opp-row-actions" style={{ flex: 'none', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 10, width: 168 }}>
