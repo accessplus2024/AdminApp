@@ -14,6 +14,8 @@ export const RESEARCH_RUN_STATUS = {
   completed: { label: 'Concluída', variant: 'success' },
   partial: { label: 'Parcial', variant: 'warning' },
   failed: { label: 'Falhou', variant: 'danger' },
+  cancelling: { label: 'Cancelando…', variant: 'warning' },
+  cancelled: { label: 'Cancelada', variant: 'neutral' },
 };
 
 export const PROPOSAL_STATUS = {
@@ -36,11 +38,31 @@ export async function fetchSentinelPosts() {
   if (!isSupabaseConfigured) return [];
   const { data, error } = await supabase
     .from('sentinel_posts')
-    .select('*, opportunity:opportunities(id,title,status)')
+    .select('*, opportunity:opportunities(id,title,status,qualification_status)')
     .order('created_at', { ascending: false })
     .limit(250);
   if (error) throw new Error(error.message);
   return data || [];
+}
+
+// Contagem de verdade por status — os cards "Na fila/Processando/
+// Qualificadas/..." usavam os mesmos 250 posts mais recentes de
+// fetchSentinelPosts, então com mais de 250 registros no total os números
+// batidos (ex.: "17 Qualificadas" na tela vs. 23 reais no banco) ficavam
+// errados só porque os mais antigos saíam da janela dos 250. Contagem exata
+// por status, sem baixar as linhas inteiras.
+export async function fetchSentinelPostCounts() {
+  if (!isSupabaseConfigured) return {};
+  const statuses = Object.keys(SENTINEL_STATUS);
+  const entries = await Promise.all(statuses.map(async (status) => {
+    const { count, error } = await supabase
+      .from('sentinel_posts')
+      .select('id', { count: 'exact', head: true })
+      .eq('status', status);
+    if (error) throw new Error(error.message);
+    return [status, count || 0];
+  }));
+  return Object.fromEntries(entries);
 }
 
 // Descarta um post do Sentinel que ficou "qualificado" mas sem nenhuma

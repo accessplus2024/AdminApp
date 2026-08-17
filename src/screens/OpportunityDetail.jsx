@@ -6,6 +6,7 @@ import { fetchComments, deleteComment } from '../lib/comments';
 import { isSupabaseConfigured } from '../lib/supabase';
 import { idDoBanco } from '../lib/opportunities';
 import { availabilityVariant, OPPORTUNITY_AVAILABILITY, opportunityAvailability } from '../lib/opportunityAvailability';
+import { enrichApprovedOpportunityNow } from '../lib/scraperWeb';
 
 const PLAT = {
   youtube:   { label: 'YouTube',   icon: 'youtube',        color: '#FF0000' },
@@ -48,6 +49,8 @@ export default function OpportunityDetail({ opp, onBack, onEdit, onDelete, onTog
   const [confirm, setConfirm] = useState(false);
   const [comentarios, setComentarios] = useState(() => (opp && opp.comentarios) || []);
   const [delId, setDelId] = useState(null);
+  const [enriching, setEnriching] = useState(false);
+  const [enrichNotice, setEnrichNotice] = useState(null);
 
   // Carrega os comentários REAIS da oportunidade (do site) quando abre o detalhe.
   useEffect(() => {
@@ -70,6 +73,25 @@ export default function OpportunityDetail({ opp, onBack, onEdit, onDelete, onTog
     setDelId(null);
   };
 
+  // Roda a mesma busca (Serper + YouTube + Reddit, com a IA avaliando cada
+  // link) que dispara sozinha quando a oportunidade é aprovada — este botão
+  // serve pra testar de novo sem precisar despublicar/publicar, ou pra tentar
+  // uma vez a mais numa oportunidade mais antiga.
+  const handleEnrich = async () => {
+    setEnriching(true); setEnrichNotice(null);
+    try {
+      const resultado = await enrichApprovedOpportunityNow(idDoBanco(opp));
+      setEnrichNotice({
+        type: 'success',
+        text: resultado.adicionados > 0
+          ? `${resultado.adicionados} link${resultado.adicionados > 1 ? 's' : ''} novo${resultado.adicionados > 1 ? 's' : ''} adicionado${resultado.adicionados > 1 ? 's' : ''} em "Recursos online".`
+          : `Nenhum link novo com confiança suficiente (${resultado.avaliados} candidato${resultado.avaliados === 1 ? '' : 's'} avaliado${resultado.avaliados === 1 ? '' : 's'}).`,
+      });
+    } catch (error) {
+      setEnrichNotice({ type: 'error', text: error.message });
+    } finally { setEnriching(false); }
+  };
+
   const published = opp.status === 'Publicada';
   const availability = opportunityAvailability(opp);
   const para = { fontSize: 14.5, lineHeight: 1.6, color: 'var(--neutral-700)' };
@@ -82,6 +104,12 @@ export default function OpportunityDetail({ opp, onBack, onEdit, onDelete, onTog
         <div style={{ flex: 1 }} />
         {perms.canWrite && (<>
           <Button variant="outline" iconLeft={Ic('pencil', 'ico-sm')} onClick={() => onEdit(opp)}>Editar</Button>
+          {published && (
+            <Button variant="outline" iconLeft={Ic('sparkles', 'ico-sm')} onClick={handleEnrich} disabled={enriching}
+              title="Busca links extras (vídeo, cobertura, discussão) via Serper/YouTube/Reddit.">
+              {enriching ? 'Buscando…' : 'Enriquecer agora'}
+            </Button>
+          )}
           <Button variant={published ? 'secondary' : 'primary'} iconLeft={Ic(published ? 'eye-off' : 'send', 'ico-sm')} onClick={() => onTogglePublish(opp)} disabled={!published && opp.qualificacao === 'unqualified'} title={!published && opp.qualificacao === 'unqualified' ? 'Revise a qualificação antes de publicar.' : undefined}>
             {published ? 'Despublicar' : 'Publicar'}
           </Button>
@@ -90,6 +118,10 @@ export default function OpportunityDetail({ opp, onBack, onEdit, onDelete, onTog
           </Button>
         </>)}
       </div>
+
+      {enrichNotice && (
+        <div className={`workflow-notice workflow-notice--${enrichNotice.type}`}>{enrichNotice.text}</div>
+      )}
 
       {/* Header card */}
       <Card>
@@ -118,7 +150,6 @@ export default function OpportunityDetail({ opp, onBack, onEdit, onDelete, onTog
             )}
             {opp.interesse.map((i) => <Badge key={i} variant="lime">{i}</Badge>)}
             {opp.qualificacao === 'unqualified' && <Badge variant="danger">Desqualificada pelo Sentinel</Badge>}
-            {opp.qualificacao === 'pending' && opp.motivoQualificacao && <Badge variant="warning">Elegibilidade incerta — revisar</Badge>}
           </div>
         </CardBody>
       </Card>
@@ -135,12 +166,6 @@ export default function OpportunityDetail({ opp, onBack, onEdit, onDelete, onTog
           {opp.qualificacao === 'unqualified' && opp.motivoQualificacao && (
             <div className="workflow-notice workflow-notice--error">
               Esta oportunidade não atende ao critério do Access+: {opp.motivoQualificacao}
-            </div>
-          )}
-
-          {opp.qualificacao === 'pending' && opp.motivoQualificacao && (
-            <div className="workflow-notice workflow-notice--warning">
-              O Sentinel não confirmou com certeza que jovens brasileiros podem participar: {opp.motivoQualificacao} Confira as fontes e ajuste a qualificação antes de publicar.
             </div>
           )}
 
@@ -184,7 +209,11 @@ export default function OpportunityDetail({ opp, onBack, onEdit, onDelete, onTog
           <Section icon="link" title="Recursos online">
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {opp.recursos.map((r, i) => {
-                const p = PLAT[r.plataforma] || PLAT.instagram;
+                // Fallback pra qualquer plataforma que a tela não reconheça
+                // (ex.: valor antigo salvo como "google") era Instagram antes
+                // — rótulo enganoso pra um link comum. "Website" é o fallback
+                // seguro: sempre é verdade que um link é, no mínimo, um site.
+                const p = PLAT[r.plataforma] || PLAT.website;
                 return (
                   <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 13, padding: 12, border: '1px solid var(--border)', borderRadius: 'var(--radius-md)' }}>
                     <span style={{

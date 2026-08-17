@@ -21,6 +21,10 @@ const BROAD_QUERY = '("high school" OR highschool OR "rising senior" OR "rising 
   + '(program OR competition OR fellowship OR mentorship OR internship OR research OR olympiad OR opportunity)';
 const FLAIR_Q = 'flair:"Opportunity"';
 
+// Lista de reserva — usada se a tabela sentinel_reddit_subreddits (editável
+// na tela do Sentinel, ver fetchActiveRedditSubreddits) estiver vazia ou sem
+// nenhuma linha ativa. Garante que o Reddit nunca fique sem NENHUM subreddit
+// só porque a tabela ficou vazia por engano.
 export const SUBREDDITS = {
   summerprogramresults: [
     [FLAIR_Q, 'new', 'year'],
@@ -37,6 +41,30 @@ export const SUBREDDITS = {
     [BROAD_QUERY, 'top', 'year'],
   ],
 };
+
+// Antes, adicionar ou tirar um subreddit exigia deploy (SUBREDDITS acima era
+// a única fonte). Agora Admin/Editor edita pela tela do Sentinel, sem
+// deploy — mesmo padrão da tabela sentinel_instagram_accounts. `queries`
+// (jsonb) guarda ["<query ou 'broad'>", sort, timeFilter] por linha — "broad"
+// é um atalho pra não pedir que quem cadastra escreva a query OR gigante na
+// mão; qualquer outro texto em `query` é usado literalmente (ex.: a busca
+// por flair, que já vem assim da migração original).
+export async function fetchActiveRedditSubreddits(supabase) {
+  const { data, error } = await supabase.from('sentinel_reddit_subreddits').select('*').eq('active', true).order('name');
+  if (error) {
+    console.warn('[sentinel] não foi possível carregar subreddits do banco, usando lista fixa de reserva:', error.message);
+    return SUBREDDITS;
+  }
+  if (!data || data.length === 0) return SUBREDDITS;
+  const resultado = {};
+  for (const row of data) {
+    const buscas = Array.isArray(row.queries) ? row.queries : [];
+    resultado[row.name] = buscas.length
+      ? buscas.map(([query, sort, timeFilter]) => [query === 'broad' ? BROAD_QUERY : query, sort || 'new', timeFilter || 'year'])
+      : [[BROAD_QUERY, 'new', 'year']];
+  }
+  return resultado;
+}
 
 const WANTED_FLAIRS = ['opportunity'];
 const RECRUIT_REJECT = [
@@ -152,9 +180,9 @@ function categoriaFlair(entryXml) {
   return matches.map((m) => m[1]).join(' ');
 }
 
-export async function coletarReddit() {
+export async function coletarReddit(subreddits = SUBREDDITS) {
   const vistos = new Map(); // normalizedTitle -> item (mantém o de maior score)
-  for (const [subreddit, buscas] of Object.entries(SUBREDDITS)) {
+  for (const [subreddit, buscas] of Object.entries(subreddits)) {
     for (const [query, sort, timeFilter] of buscas) {
       const entradas = await buscarFeed(subreddit, query, sort, timeFilter);
       for (const entryXml of entradas) {

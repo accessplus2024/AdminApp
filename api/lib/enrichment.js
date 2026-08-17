@@ -69,9 +69,16 @@ async function buscarSerper(query) {
   });
   if (!resposta.ok) throw new Error(`Serper respondeu ${resposta.status}`);
   const dados = await resposta.json();
+  // "platform" aqui precisa ser um dos valores que a tela reconhece
+  // (youtube/reddit/instagram/tiktok/website) — Serper é busca no Google,
+  // então o resultado é sempre "website". Antes isso vinha marcado como
+  // "google" (não é uma plataforma que a tela conhece): o <select> do editor
+  // não encontra essa opção e o navegador mostra a PRIMEIRA opção da lista
+  // ("YouTube") como se fosse a selecionada, mesmo sendo um link comum — foi
+  // exatamente o que gerou o rótulo errado relatado.
   return (dados.organic || []).slice(0, 5)
     .filter((r) => r.link)
-    .map((r) => ({ platform: 'google', title: r.title || r.link, url: r.link, snippet: r.snippet || '' }));
+    .map((r) => ({ platform: 'website', title: r.title || r.link, url: r.link, snippet: r.snippet || '' }));
 }
 
 async function buscarYoutube(query) {
@@ -144,7 +151,10 @@ async function avaliarCandidatos(opportunity, candidatos) {
     + '(edição, tema, processo seletivo), não de outro assunto que só apareceu na busca por coincidência de palavras; '
     + '(3) não é o perfil/post de uma pessoa qualquer, empresa não relacionada, ou resultado genérico. Se a página '
     + 'não abriu (sem conteúdo real) ou você tiver QUALQUER dúvida, marque confianca "baixa" e sugerido false — é '
-    + 'preferível perder um link bom do que publicar um errado.';
+    + 'preferível perder um link bom do que publicar um errado. (4) Se dois ou mais links da lista contarem a MESMA '
+    + 'notícia com o mesmo conteúdo (ex.: o mesmo anúncio replicado em vários blogs de oportunidades, sem nada de '
+    + 'exclusivo), sugira só o mais confiável/completo dos dois e marque os outros sugerido false com motivo '
+    + '"conteúdo repetido de outro link já sugerido" — não sugira cobertura redundante da mesma notícia.';
   const user = `Oportunidade: "${opportunity.title}"\nDescrição: "${String(opportunity.description || '').slice(0, 600)}"\n\n`
     + `Links achados (índice. [fonte] "título" — url, trecho da busca, conteúdo real da página):\n${lista}\n\n`
     + 'Para cada um, responda se é genuinamente sobre essa mesma oportunidade e sua confiança nisso. Responda SOMENTE '
@@ -199,7 +209,17 @@ export async function buscarCandidatosDeEnriquecimento(supabase, opportunityId) 
   // mão no editor) — nem manda pra IA avaliar de novo o que já foi decidido.
   const existentes = Array.isArray(opportunity.resources) ? opportunity.resources : [];
   const urlsExistentes = new Set(existentes.map((r) => r.url));
-  const brutos = [...serper, ...youtube, ...reddit].filter((c) => !urlsExistentes.has(c.url));
+  // Dedup também DENTRO desta rodada: Serper e Reddit podem devolver a mesma
+  // URL (ex.: a mesma notícia aparece no resultado do Google e é linkada num
+  // post do Reddit) — sem isso, os dois "candidatos" idênticos passavam pela
+  // avaliação da IA em paralelo, os dois eram aprovados, e a mesma URL virava
+  // dois recursos salvos (o bug relatado de "dois links iguais").
+  const vistosNestaRodada = new Set();
+  const brutos = [...serper, ...youtube, ...reddit].filter((c) => {
+    if (urlsExistentes.has(c.url) || vistosNestaRodada.has(c.url)) return false;
+    vistosNestaRodada.add(c.url);
+    return true;
+  });
 
   const candidatos = await avaliarCandidatos(opportunity, brutos);
 
@@ -225,8 +245,16 @@ export async function confirmarEnriquecimento(supabase, opportunityId, escolhido
 
   const existentes = Array.isArray(opportunity.resources) ? opportunity.resources : [];
   const urlsExistentes = new Set(existentes.map((r) => r.url));
+  // Reforço aqui também (além do dedup em buscarCandidatosDeEnriquecimento):
+  // se por algum motivo `escolhidos` chegar com a mesma URL mais de uma vez,
+  // não salva a mesma URL duas vezes em `resources`.
+  const vistosNestaConfirmacao = new Set();
   const novos = lista
-    .filter((r) => !urlsExistentes.has(r.url))
+    .filter((r) => {
+      if (urlsExistentes.has(r.url) || vistosNestaConfirmacao.has(r.url)) return false;
+      vistosNestaConfirmacao.add(r.url);
+      return true;
+    })
     .map((r) => ({ platform: r.platform || 'website', label: r.title || r.label || r.url, url: r.url }));
 
   if (novos.length) {
@@ -235,7 +263,7 @@ export async function confirmarEnriquecimento(supabase, opportunityId, escolhido
     if (updateError) throw updateError;
   }
 
-  return { adicionados: novos.length, total: existentes.length + novos.length };
+  return { adicionados: novos.length, total: existentes.length + novos.length, links: novos };
 }
 
 // Automático — roda sozinho (chamado pelo cron diário) pra oportunidade recém
@@ -257,9 +285,11 @@ export async function enriquecerAutomaticamente(supabase, opportunityId) {
 
   return {
     opportunityId,
+    opportunityTitle: resultado.query,
     avaliados: resultado.candidatos.length,
     adicionados: salvo.adicionados,
     ignorados: resultado.candidatos.length - aprovadosPelaIa.length,
+    links: salvo.links || [],
     errors: resultado.errors,
   };
 }

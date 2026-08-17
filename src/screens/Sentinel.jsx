@@ -8,14 +8,21 @@ import { buildCitationUrl } from '../lib/citationUrl';
 import { formatElapsedDuration } from '../lib/sentinelTime';
 import { availabilityVariant, OPPORTUNITY_AVAILABILITY, opportunityAvailability } from '../lib/opportunityAvailability';
 import {
-  addManualOpportunity, applyResearchProposal, dismissSentinelPost, fetchResearchRun, fetchResearchRuns, fetchSentinelPosts,
+  addManualOpportunity, applyResearchProposal, dismissSentinelPost, fetchResearchRun, fetchResearchRuns,
+  fetchSentinelPostCounts, fetchSentinelPosts,
   PROPOSAL_STATUS, RESEARCH_RUN_STATUS, rejectResearchProposal, researchCatalogOpportunities,
   resumeCatalogResearch, runSentinel, SENTINEL_STATUS,
 } from '../lib/sentinel';
-import { collectSources, researchCandidates, WEB_SOURCES } from '../lib/scraperWeb';
+import {
+  collectSources, researchCandidates, WEB_SOURCES, enrichApprovedOpportunityNow,
+  cancelResearch,
+} from '../lib/scraperWeb';
 import {
   addInstagramAccount, fetchInstagramAccounts, removeInstagramAccount, setInstagramAccountActive,
 } from '../lib/instagramAccounts';
+import {
+  addRedditSubreddit, fetchRedditSubreddits, removeRedditSubreddit, setRedditSubredditActive,
+} from '../lib/redditSubreddits';
 import { deleteOpportunity, updateOpportunity } from '../lib/opportunities';
 
 const FIELD_LABELS = {
@@ -25,7 +32,10 @@ const FIELD_LABELS = {
   process: 'Sobre o processo', applicants: 'Dicas', additionals: 'Informações adicionais', type: 'Tipo',
   status: 'Disponibilidade', qualification_status: 'Qualificação', qualification_reason: 'Motivo da qualificação',
 };
-const RUN_TYPES = { discovery: 'Descoberta no Instagram', manual: 'Pesquisa por URL', catalog_review: 'Revisão do catálogo' };
+const RUN_TYPES = {
+  discovery: 'Descoberta no Instagram', manual: 'Pesquisa por URL', catalog_review: 'Revisão do catálogo',
+  enrichment: 'Enriquecimento de links', web_research: 'Pesquisa de candidatos (sites)',
+};
 const MODEL_LABELS = {
   'openai/gpt-oss-20b': 'GPT OSS 20B',
   'openai/gpt-oss-120b': 'GPT OSS 120B',
@@ -206,6 +216,29 @@ function RunLog({ run, now }) {
       </div>
 
       {run.error && <div className="workflow-notice workflow-notice--error"><strong>Erro da execução:</strong> {run.error}</div>}
+
+      {run.run_type === 'enrichment' && (
+        <div className="sentinel-run-log__enrichment">
+          <p><strong>Oportunidade:</strong> {run.metadata?.opportunity_title || `#${run.metadata?.opportunity_id}`}</p>
+          {(run.metadata?.links || []).length > 0 ? (
+            <ul>
+              {run.metadata.links.map((link, i) => (
+                <li key={i}>
+                  <a href={link.url} target="_blank" rel="noopener noreferrer">{link.label || link.url}</a>
+                  {' '}· {link.platform}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p>Nenhum link novo adicionado ({run.metadata?.avaliados || 0} candidato{run.metadata?.avaliados === 1 ? '' : 's'} avaliado{run.metadata?.avaliados === 1 ? '' : 's'}).</p>
+          )}
+          {run.metadata?.errors && Object.keys(run.metadata.errors).length > 0 && (
+            <p className="sentinel-run-timeline__error">
+              Falhas parciais: {Object.entries(run.metadata.errors).map(([fonte, msg]) => `${fonte} (${msg})`).join('; ')}
+            </p>
+          )}
+        </div>
+      )}
 
       <details className="sentinel-events-details" onToggle={(event) => setEventsOpen(event.currentTarget.open)}>
         <summary>{eventsOpen ? 'Ocultar eventos' : 'Ver eventos'}<span>{entries.length} registros</span></summary>
@@ -424,10 +457,11 @@ function QualifiedPostCard({ post, onApprove, onReject, onDismiss, busy, canWrit
 export default function Sentinel({ perms, opportunities = [], catalogLoading = false, onCatalogChanged }) {
   const [tab, setTab] = useState('review');
   const [posts, setPosts] = useState([]);
+  const [postCounts, setPostCounts] = useState({});
   const [runs, setRuns] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [discovering, setDiscovering] = useState(false);
   const [researching, setResearching] = useState(false);
+  const [manualBusy, setManualBusy] = useState(false);
   const [reviewingId, setReviewingId] = useState(null);
   const [manualUrl, setManualUrl] = useState('');
   // Antes o padrão era 'all': misturava na fila/processando/duplicada/rejeitada/
@@ -449,12 +483,39 @@ export default function Sentinel({ perms, opportunities = [], catalogLoading = f
   const [loadingRunId, setLoadingRunId] = useState(null);
   const [clockNow, setClockNow] = useState(() => Date.now());
   const [webFontesEscolhidas, setWebFontesEscolhidas] = useState(() => new Set(WEB_SOURCES));
+  // Instagram não é "um site" do FONTES (roda via Apify, num pipeline
+  // próprio) — não dá pra simplesmente somar ele à lista `sites` mandada pro
+  // scraper de sites, ou o backend rejeita ("nenhuma fonte encontrada"). Por
+  // isso é um checkbox separado aqui do lado, mas o clique único de "Buscar e
+  // analisar" já dispara os dois pipelines juntos quando marcado.
+  const [instagramEscolhido, setInstagramEscolhido] = useState(true);
+  // Progresso ao vivo da busca de sites/Reddit — sem isso, "Buscar e
+  // analisar" fica minutos parado no mesmo texto (coletando várias fontes,
+  // depois pesquisando um por um com IA) e parece travado/quebrado, mesmo
+  // funcionando normalmente. `webStage` marca em qual das duas fases está;
+  // `webProgress` guarda quantos itens já foram processados de quantos, lido
+  // direto da run (sentinel_posts ligados a ela via run_id) enquanto ela roda.
+  const [webStage, setWebStage] = useState(null); // 'collect' | 'research' | null
+  const [webProgress, setWebProgress] = useState(null); // { processed, total }
   const [webBusy, setWebBusy] = useState(null); // rótulo do que está rodando agora, ou null
   const [webError, setWebError] = useState('');
+  const [webRunId, setWebRunId] = useState(null); // id da execução de pesquisa em andamento, pra poder cancelar
+  const [cancelandoRunId, setCancelandoRunId] = useState(null);
+  // Detalhe por fonte da última coleta — pra responder "por que uma
+  // oportunidade que eu sei que existe não apareceu?": mostra quantos itens
+  // brutos cada site trouxe e quantos foram descartados, e por qual motivo
+  // (filtro de palavra-chave, título duplicado, URL já vista), em vez de só
+  // o total final que sobrou na fila.
+  const [collectReport, setCollectReport] = useState(null);
   const [igAccounts, setIgAccounts] = useState([]);
   const [igNovoUsername, setIgNovoUsername] = useState('');
   const [igBusy, setIgBusy] = useState(false);
   const [igError, setIgError] = useState('');
+  const [redditManagerOpen, setRedditManagerOpen] = useState(false);
+  const [redditSubs, setRedditSubs] = useState([]);
+  const [redditNovoNome, setRedditNovoNome] = useState('');
+  const [redditBusy, setRedditBusy] = useState(false);
+  const [redditError, setRedditError] = useState('');
   const activeRunIdRef = useRef(null);
   const loadRequestRef = useRef(0);
   const opportunityFilter = useOpportunityFilters(opportunities, { initialSort: 'prazo' });
@@ -477,9 +538,10 @@ export default function Sentinel({ perms, opportunities = [], catalogLoading = f
   const load = useCallback(async (preferredRunId) => {
     const requestId = ++loadRequestRef.current;
     try {
-      const [nextPosts, nextRuns] = await Promise.all([fetchSentinelPosts(), fetchResearchRuns()]);
+      const [nextPosts, nextRuns, nextCounts] = await Promise.all([fetchSentinelPosts(), fetchResearchRuns(), fetchSentinelPostCounts()]);
       if (requestId !== loadRequestRef.current) return;
       setPosts(nextPosts);
+      setPostCounts(nextCounts);
       setRuns((current) => nextRuns.map((run) => {
         const previous = current.find((item) => String(item.id) === String(run.id));
         return previous?.proposals ? { ...run, proposals: previous.proposals, posts: previous.posts || [] } : run;
@@ -530,6 +592,36 @@ export default function Sentinel({ perms, opportunities = [], catalogLoading = f
     finally { setIgBusy(false); }
   };
 
+  const loadRedditSubs = useCallback(async () => {
+    try { setRedditSubs(await fetchRedditSubreddits()); }
+    catch (error) { setRedditError(error.message); }
+  }, []);
+  useEffect(() => { void loadRedditSubs(); }, [loadRedditSubs]);
+
+  const adicionarSubreddit = async (event) => {
+    event.preventDefault();
+    if (!redditNovoNome.trim()) return;
+    setRedditBusy(true); setRedditError('');
+    try {
+      await addRedditSubreddit(redditNovoNome);
+      setRedditNovoNome('');
+      await loadRedditSubs();
+    } catch (error) { setRedditError(error.message); }
+    finally { setRedditBusy(false); }
+  };
+  const alternarSubreddit = async (sub) => {
+    setRedditBusy(true); setRedditError('');
+    try { await setRedditSubredditActive(sub.name, !sub.active); await loadRedditSubs(); }
+    catch (error) { setRedditError(error.message); }
+    finally { setRedditBusy(false); }
+  };
+  const removerSubreddit = async (sub) => {
+    setRedditBusy(true); setRedditError('');
+    try { await removeRedditSubreddit(sub.name); await loadRedditSubs(); }
+    catch (error) { setRedditError(error.message); }
+    finally { setRedditBusy(false); }
+  };
+
   // A oportunidade já existe no catálogo (status "Revisar") assim que o post
   // vira "Qualificada" — pra nunca se perder, mesmo se ninguém revisar aqui.
   // Aprovar/rejeitar nesta tela é só um atalho que evita abrir "Em revisão"
@@ -538,8 +630,23 @@ export default function Sentinel({ perms, opportunities = [], catalogLoading = f
     if (!post.opportunity?.id) return;
     setPostActionBusy(post.id); setNotice(null);
     try {
-      await updateOpportunity(post.opportunity.id, { status: 'Aprovada' });
+      // Mesmo raciocínio do botão "Publicar" em Oportunidades/Revisão: se o
+      // Sentinel tinha deixado isso como "pending" (elegibilidade incerta),
+      // aprovar aqui é a revisão humana que resolve essa dúvida — sem isso,
+      // o badge "Elegibilidade incerta" ficaria preso mesmo depois de aprovada.
+      const patch = { status: 'Aprovada' };
+      if (post.opportunity.qualification_status === 'pending') {
+        patch.qualification_status = 'qualified';
+        patch.qualification_reason = 'Revisado e aprovado manualmente por um administrador.';
+      }
+      await updateOpportunity(post.opportunity.id, patch);
       setNotice({ type: 'success', text: `“${post.opportunity.title || post.extracted?.title || 'Oportunidade'}” aprovada e publicada.` });
+      // Assim que aprova, já dispara a busca de links extras (Serper/YouTube/
+      // Reddit) — não espera mais o cron diário (removido a pedido). Apoio:
+      // nunca trava a aprovação nem aparece como erro pro usuário se falhar.
+      enrichApprovedOpportunityNow(post.opportunity.id).catch((e) => {
+        console.error('Enriquecimento automático falhou:', e.message);
+      });
       await Promise.all([load(), onCatalogChanged?.()]);
     } catch (error) { setNotice({ type: 'error', text: error.message }); }
     finally { setPostActionBusy(null); }
@@ -594,6 +701,26 @@ export default function Sentinel({ perms, opportunities = [], catalogLoading = f
     const interval = window.setInterval(() => setClockNow(Date.now()), 1000);
     return () => window.clearInterval(interval);
   }, [hasRunningLog]);
+  // Enquanto a pesquisa (fase cara, com IA) estiver rodando com um runId
+  // conhecido, busca a run a cada poucos segundos só pra contar quantos itens
+  // ligados a ela já saíram de "pending"/"queued" — isso já muda a cada item
+  // processado, mesmo a run em si só sendo fechada (updateRun) no final.
+  useEffect(() => {
+    if (webStage !== 'research' || !webRunId) { setWebProgress(null); return undefined; }
+    let cancelado = false;
+    const verificar = async () => {
+      try {
+        const run = await fetchResearchRun(webRunId);
+        if (cancelado || !run) return;
+        const posts = run.posts || [];
+        const processados = posts.filter((post) => post.status !== 'pending' && post.status !== 'queued').length;
+        setWebProgress({ processed: processados, total: posts.length || run.requested_count || 0 });
+      } catch { /* silencioso — só é um contador auxiliar, não bloqueia nada */ }
+    };
+    void verificar();
+    const interval = window.setInterval(verificar, 3000);
+    return () => { cancelado = true; window.clearInterval(interval); };
+  }, [webStage, webRunId]);
   const proposals = useMemo(() => {
     const items = activeRun?.proposals || [];
     return proposalFilter === 'all' ? items : items.filter((proposal) => proposal.status === proposalFilter);
@@ -607,18 +734,13 @@ export default function Sentinel({ perms, opportunities = [], catalogLoading = f
   // Achado real: "Young Feminist AI School 2026" e outras apareciam de novo
   // aqui mesmo já aprovadas no catálogo — o post é "qualificado" pra sempre
   // (é o histórico da execução que criou a oportunidade), mas não há mais
-  // nada pra revisar. Separar pelos que ainda importam decidir (opportunity
-  // em "Revisar" ou sem vínculo) dos que já foram decididos evita mostrar uma
-  // ficha inteira, com botão de aplicar, pra algo que já está no catálogo.
-  const { qualifiedNew, qualifiedRegistered } = useMemo(() => {
-    if (logFilter !== 'qualified') return { qualifiedNew: [], qualifiedRegistered: [] };
-    const qualifiedNew = [];
-    const qualifiedRegistered = [];
-    for (const post of filteredPosts) {
-      if (post.opportunity?.id && post.opportunity.status !== 'Revisar') qualifiedRegistered.push(post);
-      else qualifiedNew.push(post);
-    }
-    return { qualifiedNew, qualifiedRegistered };
+  // nada pra revisar. Antes isso ficava visível numa lista "já cadastradas"
+  // que só recolhia mas nunca esvaziava — ia acumular pra sempre. Agora,
+  // uma vez decidido (aprovado, encerrado etc.), o post some completamente
+  // desta tela: essa fila é só pra quem ainda precisa de uma decisão.
+  const qualifiedNew = useMemo(() => {
+    if (logFilter !== 'qualified') return [];
+    return filteredPosts.filter((post) => !post.opportunity?.id || post.opportunity.status === 'Revisar');
   }, [filteredPosts, logFilter]);
 
   const toggleOpportunity = (id) => setSelected((current) => {
@@ -658,38 +780,40 @@ export default function Sentinel({ perms, opportunities = [], catalogLoading = f
     })));
   };
 
-  const executeDiscovery = async () => {
-    setDiscovering(true); setNotice(null);
-    try {
-      const result = await runSentinel({ allQueued: true });
-      const resultText = [
-        result.instagramAccounts === 0 ? 'Instagram desligado (nenhuma conta ativa)' : null,
-        countLabel(result.newPosts, 'post novo', 'posts novos'),
-        result.skippedKnownOpportunity ? countLabel(result.skippedKnownOpportunity, 'já no catálogo (ignorado)', 'já no catálogo (ignorados)') : null,
-        result.skippedLowScore ? countLabel(result.skippedLowScore, 'sem sinal suficiente (ignorado)', 'sem sinal suficiente (ignorados)') : null,
-        countLabel(result.candidates, 'item analisado', 'itens analisados'),
-        countLabel(result.created, 'oportunidade enviada para revisão', 'oportunidades enviadas para revisão'),
-        countLabel(result.duplicates || 0, 'duplicata vinculada', 'duplicatas vinculadas'),
-        `${result.queued || 0} na fila`,
-      ].filter(Boolean).join(' · ');
-      setNotice({ type: 'success', text: resultText });
-      await load();
-      try { await onCatalogChanged?.(); }
-      catch (error) { setNotice({ type: 'error', text: `${resultText} O catálogo não pôde ser sincronizado: ${error.message}` }); }
-    } catch (error) { setNotice({ type: 'error', text: error.message }); }
-    finally { setDiscovering(false); }
-  };
-
   const rodarWeb = async (rotulo, acao) => {
-    setWebBusy(rotulo); setWebError('');
+    // Antes esse botão só avisava em caso de erro — quando dava tudo certo
+    // (ou quando não achava nada novo), a tela não mostrava nada, então
+    // parecia que o clique não tinha feito efeito nenhum.
+    setWebBusy(rotulo); setWebError(''); setNotice(null); setWebRunId(null);
     try {
-      await acao();
+      const resultado = await acao();
       await load();
       await onCatalogChanged?.();
+      if (resultado) setNotice({ type: 'success', text: resultado });
     } catch (error) {
       setWebError(error.message);
     } finally {
-      setWebBusy(null);
+      setWebBusy(null); setWebRunId(null); setWebStage(null); setWebProgress(null);
+    }
+  };
+  // Cancela qualquer execução de pesquisa de candidatos (web_research) que
+  // esteja "running" — tanto a que está rodando nesta aba agora (webRunId)
+  // quanto uma antiga que ficou presa em "running" (ex.: a aba fechou ou a
+  // function estourou o tempo antes de terminar). Não existe mais um botão
+  // separado de "destravar pendentes": cancelar já devolve pra fila tudo que
+  // ficou preso em "pending" daquela execução, então cancelar É a forma de
+  // destravar.
+  const cancelarPesquisa = async (runId = webRunId) => {
+    if (!runId) return;
+    setCancelandoRunId(runId);
+    try {
+      await cancelResearch(runId);
+      setNotice({ type: 'success', text: 'Cancelamento pedido — os itens já em andamento terminam, o resto volta pra fila.' });
+      await load();
+    } catch (error) {
+      setNotice({ type: 'error', text: error.message });
+    } finally {
+      setCancelandoRunId(null);
     }
   };
   const alternarWebFonte = (nome) => setWebFontesEscolhidas((prev) => {
@@ -700,21 +824,31 @@ export default function Sentinel({ perms, opportunities = [], catalogLoading = f
   const addManual = async (event) => {
     event.preventDefault();
     if (!manualUrl.trim()) return;
-    setDiscovering(true); setNotice(null);
+    setManualBusy(true); setNotice(null);
     try {
       const result = await addManualOpportunity(manualUrl.trim());
       setManualUrl('');
+      // "duplicate" com updated=true não é uma falha — é o caso do Ross
+      // Program: a URL já existia no catálogo, mas a pesquisa achou conteúdo
+      // novo (financial aid, processo etc.) e mandou a oportunidade de volta
+      // pra revisão. Antes isso caía direto em "nenhuma oportunidade
+      // qualificada", escondendo que algo bom aconteceu.
+      const success = result.status === 'qualified' || (result.status === 'duplicate' && result.updated);
       const resultText = result.status === 'qualified'
         ? 'Oportunidade encontrada e enviada para revisão.'
+        : result.status === 'duplicate' && result.updated
+        ? 'Essa oportunidade já existia no catálogo — a pesquisa achou informações novas e mandou de volta para revisão.'
+        : result.status === 'duplicate'
+        ? 'Essa oportunidade já existe no catálogo e a pesquisa não achou nada novo além do que já está salvo.'
         : 'Nenhuma oportunidade qualificada foi encontrada nessa URL.';
-      setNotice({ type: result.status === 'qualified' ? 'success' : 'error', text: resultText });
+      setNotice({ type: success || result.status === 'duplicate' ? 'success' : 'error', text: resultText });
       await load();
-      if (result.status === 'qualified') {
+      if (success) {
         try { await onCatalogChanged?.(); }
         catch (error) { setNotice({ type: 'error', text: `${resultText} O catálogo não pôde ser sincronizado: ${error.message}` }); }
       }
     } catch (error) { setNotice({ type: 'error', text: error.message }); }
-    finally { setDiscovering(false); }
+    finally { setManualBusy(false); }
   };
 
   const runCatalogResearch = async () => {
@@ -862,8 +996,12 @@ export default function Sentinel({ perms, opportunities = [], catalogLoading = f
 
       {tab === 'discover' && (
         <>
-          <section className="sentinel-hero"><div><span className="sentinel-eyebrow">RADAR DE OPORTUNIDADES</span><h2>Encontre novas oportunidades para revisar.</h2><p>Busque novas fontes e analise toda a fila. Cada oportunidade passa por revisão antes de ser publicada.</p></div><Button variant="primary" iconLeft={Ic(discovering ? 'loader-circle' : 'radar', 'ico-sm')} onClick={executeDiscovery} disabled={!perms.canWrite || discovering}>{discovering ? 'Analisando fila…' : 'Buscar e analisar fila'}</Button></section>
-          <div className="sentinel-stats"><Card><CardBody><Stat label="Na fila" value={posts.filter((post) => post.status === 'queued').length} icon={Ic('list-ordered', 'ico-sm')} /></CardBody></Card><Card><CardBody><Stat label="Processando" value={posts.filter((post) => post.status === 'pending').length} icon={Ic('clock-3', 'ico-sm')} /></CardBody></Card><Card><CardBody><Stat label="Qualificadas" value={posts.filter((post) => post.status === 'qualified').length} icon={Ic('badge-check', 'ico-sm')} /></CardBody></Card><Card><CardBody><Stat label="Duplicadas" value={posts.filter((post) => post.status === 'duplicate').length} icon={Ic('copy-check', 'ico-sm')} /></CardBody></Card><Card><CardBody><Stat label="Falhas" value={posts.filter((post) => post.status === 'failed').length} icon={Ic('triangle-alert', 'ico-sm')} /></CardBody></Card></div>
+          <section className="sentinel-hero"><div><span className="sentinel-eyebrow">RADAR DE OPORTUNIDADES</span><h2>Encontre novas oportunidades para revisar.</h2><p>Escolha as fontes abaixo (sites, Reddit e Instagram) e analise toda a fila de uma vez. Cada oportunidade passa por revisão antes de ser publicada.</p></div></section>
+          {/* Antes contava só os 250 posts mais recentes (fetchSentinelPosts
+              tem limite); com mais de 250 no total, os números batidos ficavam
+              menores que o real (ex.: "17 Qualificadas" na tela vs. 23 no
+              banco). Agora usa contagem exata por status. */}
+          <div className="sentinel-stats"><Card><CardBody><Stat label="Na fila" value={postCounts.queued ?? 0} icon={Ic('list-ordered', 'ico-sm')} /></CardBody></Card><Card><CardBody><Stat label="Processando" value={postCounts.pending ?? 0} icon={Ic('clock-3', 'ico-sm')} /></CardBody></Card><Card><CardBody><Stat label="Qualificadas" value={postCounts.qualified ?? 0} icon={Ic('badge-check', 'ico-sm')} /></CardBody></Card><Card><CardBody><Stat label="Duplicadas" value={postCounts.duplicate ?? 0} icon={Ic('copy-check', 'ico-sm')} /></CardBody></Card><Card><CardBody><Stat label="Falhas" value={postCounts.failed ?? 0} icon={Ic('triangle-alert', 'ico-sm')} /></CardBody></Card></div>
 
           <Card flat>
             <CardHeader><CardTitle style={{ fontSize: 16 }}>Sites e fóruns (scrapers)</CardTitle><p className="card-helper">Mesma fila e mesmos filtros do Instagram. A busca já filtra duplicatas contra o catálogo e a pesquisa roda sozinha em seguida (até 25 itens por vez) — sem precisar escolher um por um. O Instagram está incluído aqui como mais uma fonte: clique nele para gerenciar as contas.</p></CardHeader>
@@ -872,6 +1010,7 @@ export default function Sentinel({ perms, opportunities = [], catalogLoading = f
                 {WEB_SOURCES.map((nome) => (
                   <Checkbox key={nome} label={nome} checked={webFontesEscolhidas.has(nome)} onChange={() => alternarWebFonte(nome)} />
                 ))}
+                <Checkbox label="Instagram" checked={instagramEscolhido} onChange={() => setInstagramEscolhido((v) => !v)} />
                 <button
                   type="button"
                   onClick={() => setIgManagerOpen((open) => !open)}
@@ -882,27 +1021,111 @@ export default function Sentinel({ perms, opportunities = [], catalogLoading = f
                   <span>Instagram ({igAccounts.filter((conta) => conta.active).length} {igAccounts.filter((conta) => conta.active).length === 1 ? 'conta ativa' : 'contas ativas'})</span>
                   {Ic(igManagerOpen ? 'chevron-up' : 'chevron-down', 'ico-xs')}
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setRedditManagerOpen((open) => !open)}
+                  aria-expanded={redditManagerOpen}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 14, background: 'none', border: '1px solid var(--border)', borderRadius: 999, padding: '4px 12px', cursor: 'pointer' }}
+                >
+                  <span>Reddit ({redditSubs.filter((sub) => sub.active).length} {redditSubs.filter((sub) => sub.active).length === 1 ? 'subreddit ativo' : 'subreddits ativos'})</span>
+                  {Ic(redditManagerOpen ? 'chevron-up' : 'chevron-down', 'ico-xs')}
+                </button>
               </div>
               <p style={{ color: 'var(--muted-foreground)', fontSize: 13, marginTop: -4, marginBottom: 12 }}>
-                O Reddit demora mais que os outros (busca por página, sem API paga) — se ele estiver marcado, a busca pode levar bem mais tempo que só as outras fontes.
+                O Reddit já vem marcado acima por padrão sempre que houver algum subreddit ativo (painel "Reddit" acima) — desmarque pra rodar sem ele, ou deixe só ele marcado pra rodar apenas o Reddit. Ele demora mais que os outros (busca por página, sem API paga), então a busca pode levar bem mais tempo quando ele está incluído. Pra saber se ele está funcionando: rode uma busca com ele marcado e abra "Ver detalhe por fonte da última coleta" (abaixo, depois do resultado) — aparece quantos itens o Reddit trouxe, ou o erro, se algum bloqueio (Reddit costuma limitar buscas vindas de servidores) tiver acontecido.
               </p>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                <Button variant="outline" onClick={() => setWebFontesEscolhidas(webFontesEscolhidas.size === WEB_SOURCES.length ? new Set() : new Set(WEB_SOURCES))}>
-                  {webFontesEscolhidas.size === WEB_SOURCES.length ? 'Desmarcar todas' : 'Marcar todas'}
+                <Button variant="outline" onClick={() => {
+                  const tudoMarcado = webFontesEscolhidas.size === WEB_SOURCES.length && instagramEscolhido;
+                  setWebFontesEscolhidas(tudoMarcado ? new Set() : new Set(WEB_SOURCES));
+                  setInstagramEscolhido(!tudoMarcado);
+                }}>
+                  {webFontesEscolhidas.size === WEB_SOURCES.length && instagramEscolhido ? 'Desmarcar todas' : 'Marcar todas'}
                 </Button>
                 <Button
                   variant="primary"
-                  disabled={!perms.canWrite || webBusy !== null || webFontesEscolhidas.size === 0}
+                  disabled={!perms.canWrite || webBusy !== null || (webFontesEscolhidas.size === 0 && !instagramEscolhido)}
                   iconLeft={Ic(webBusy === 'collect' ? 'loader' : 'search', 'ico-sm')}
                   onClick={() => rodarWeb('collect', async () => {
-                    await collectSources([...webFontesEscolhidas]);
-                    await researchCandidates({ maxCandidates: 25 });
+                    // Instagram roda num pipeline totalmente separado (Apify),
+                    // então dispara em paralelo com a coleta+pesquisa dos
+                    // sites/Reddit, e o resultado dos dois é combinado num só
+                    // texto — igual ao antigo botão "Buscar e analisar fila",
+                    // só que agora dentro do mesmo clique dos sites.
+                    setWebStage('collect'); setWebProgress(null);
+                    const [coleta, instagramResult] = await Promise.all([
+                      webFontesEscolhidas.size > 0 ? collectSources([...webFontesEscolhidas]) : Promise.resolve(null),
+                      instagramEscolhido ? runSentinel({ allQueued: true }).catch((error) => ({ erro: error.message })) : Promise.resolve(null),
+                    ]);
+                    setCollectReport(coleta || null);
+                    setWebStage('research');
+                    const pesquisa = webFontesEscolhidas.size > 0
+                      ? await researchCandidates({ maxCandidates: 25, onRunId: setWebRunId })
+                      : null;
+                    setWebRunId(null); setWebStage(null); setWebProgress(null);
+                    return [
+                      coleta ? countLabel(coleta?.totalEnfileirado || 0, 'novo item coletado', 'novos itens coletados') : null,
+                      pesquisa ? countLabel(pesquisa?.processados || 0, 'item analisado', 'itens analisados') : null,
+                      pesquisa?.qualificados ? countLabel(pesquisa.qualificados, 'qualificado', 'qualificados') : null,
+                      pesquisa?.duplicados ? countLabel(pesquisa.duplicados, 'duplicata', 'duplicatas') : null,
+                      pesquisa?.cancelado ? `pesquisa cancelada (${pesquisa.naoIniciados} item(ns) devolvido(s) à fila)` : null,
+                      coleta?.limpeza ? countLabel(coleta.limpeza, 'registro antigo removido', 'registros antigos removidos') : null,
+                      instagramResult?.erro ? `Instagram: ${instagramResult.erro}`
+                        : instagramResult?.instagramAccounts === 0 ? 'Instagram desligado (nenhuma conta ativa)'
+                        : instagramResult ? countLabel(instagramResult.created || 0, 'oportunidade do Instagram enviada para revisão', 'oportunidades do Instagram enviadas para revisão')
+                        : null,
+                    ].filter(Boolean).join(' · ');
                   })}
                 >
-                  {webBusy === 'collect' ? 'Buscando e analisando…' : `Buscar e analisar (${webFontesEscolhidas.size} ${webFontesEscolhidas.size === 1 ? 'fonte' : 'fontes'})`}
+                  {webBusy === 'collect'
+                    ? (webStage === 'research'
+                        ? (webProgress?.total ? `Analisando… ${webProgress.processed} de ${webProgress.total}` : 'Analisando oportunidades…')
+                        : 'Coletando fontes selecionadas…')
+                    : `Buscar e analisar (${webFontesEscolhidas.size + (instagramEscolhido ? 1 : 0)} ${webFontesEscolhidas.size + (instagramEscolhido ? 1 : 0) === 1 ? 'fonte' : 'fontes'})`}
                 </Button>
+                {webBusy === 'collect' && webRunId && (
+                  <Button variant="outline" onClick={() => cancelarPesquisa()} disabled={cancelandoRunId === webRunId} iconLeft={Ic('x', 'ico-sm')}>
+                    {cancelandoRunId === webRunId ? 'Cancelando…' : 'Cancelar pesquisa'}
+                  </Button>
+                )}
               </div>
               {webError && <p style={{ color: 'var(--danger)', fontSize: 13, marginTop: 12 }}>{webError}</p>}
+
+              {collectReport?.fontes?.length > 0 && (
+                // Aberto sozinho quando alguma fonte (ex.: Reddit) veio com erro
+                // ou aviso — é a resposta direta pra "como sei se o Reddit está
+                // funcionando": depois de rodar uma busca com ele marcado, esse
+                // painel mostra a linha do Reddit com quantos itens ele trouxe
+                // (ou o erro, se tiver dado 429/bloqueio).
+                <details style={{ marginTop: 14 }} open={collectReport.fontes.some((fonte) => fonte.erro || fonte.aviso)}>
+                  <summary style={{ cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
+                    Ver detalhe por fonte da última coleta
+                  </summary>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 10 }}>
+                    {collectReport.fontes.map((fonte) => {
+                      const d = fonte.descartados || {};
+                      const totalDescartado = (d.semLink || 0) + (d.filtro || 0) + (d.duplicataTitulo || 0) + (d.duplicataUrl || 0);
+                      return (
+                        <div key={fonte.nome} style={{ padding: 10, border: '1px solid var(--border)', borderRadius: 8, fontSize: 12.5 }}>
+                          <strong>{fonte.nome}</strong> — {fonte.itensBrutos} item{fonte.itensBrutos === 1 ? '' : 's'} bruto{fonte.itensBrutos === 1 ? '' : 's'}, {fonte.novosNaFila} nova{fonte.novosNaFila === 1 ? '' : 's'} na fila
+                          {fonte.erro && <p style={{ color: 'var(--danger)', margin: '4px 0 0' }}>Erro: {fonte.erro}</p>}
+                          {fonte.aviso && <p style={{ color: 'var(--warning, #b45309)', margin: '4px 0 0' }}>{fonte.aviso}</p>}
+                          {totalDescartado > 0 && (
+                            <p style={{ color: 'var(--muted-foreground)', margin: '4px 0 0' }}>
+                              Descartados: {[
+                                d.filtro ? `${d.filtro} não bateram o filtro (nível/financeiro/nacionalidade)` : null,
+                                d.duplicataTitulo ? `${d.duplicataTitulo} título já conhecido` : null,
+                                d.duplicataUrl ? `${d.duplicataUrl} URL já vista antes` : null,
+                                d.semLink ? `${d.semLink} sem link` : null,
+                              ].filter(Boolean).join(' · ')}
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </details>
+              )}
 
               {igManagerOpen && (
                 <div className="sentinel-source-details__body" style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--border)' }}>
@@ -931,11 +1154,38 @@ export default function Sentinel({ perms, opportunities = [], catalogLoading = f
                   {igError && <p style={{ color: 'var(--danger)', fontSize: 13, marginTop: 12 }}>{igError}</p>}
                 </div>
               )}
+
+              {redditManagerOpen && (
+                <div className="sentinel-source-details__body" style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--border)' }}>
+                  <p className="card-helper" style={{ marginTop: 0 }}>Subreddits que o Sentinel varre em busca de oportunidades (busca por texto/flair, sem precisar de app aprovado pelo Reddit). Sem nenhum ativo, usa uma lista fixa de reserva no código.</p>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14 }}>
+                    {redditSubs.length === 0 && <p className="card-helper" style={{ margin: 0 }}>Nenhum subreddit cadastrado ainda — usando a lista fixa de reserva.</p>}
+                    {redditSubs.map((sub) => (
+                      <div key={sub.name} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <Checkbox checked={sub.active} onChange={() => alternarSubreddit(sub)} disabled={!perms.canWrite || redditBusy} />
+                        <span style={{ flex: 1, fontSize: 14 }}>r/{sub.name}</span>
+                        {!sub.active && <Badge variant="neutral">Desativado</Badge>}
+                        {perms.canWrite && (
+                          <Button variant="ghost" size="icon" aria-label={`Remover r/${sub.name}`} onClick={() => removerSubreddit(sub)} disabled={redditBusy} style={{ color: 'var(--vermelha)' }}>
+                            {Ic('trash-2', 'ico-xs')}
+                          </Button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  {perms.canWrite && (
+                    <form onSubmit={adicionarSubreddit} style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      <Input value={redditNovoNome} onChange={(event) => setRedditNovoNome(event.target.value)} placeholder="nome do subreddit (sem r/)" disabled={redditBusy} style={{ maxWidth: 240 }} />
+                      <Button type="submit" variant="outline" iconLeft={Ic('plus', 'ico-xs')} disabled={!redditNovoNome.trim() || redditBusy}>Adicionar subreddit</Button>
+                    </form>
+                  )}
+                  {redditError && <p style={{ color: 'var(--danger)', fontSize: 13, marginTop: 12 }}>{redditError}</p>}
+                </div>
+              )}
             </CardBody>
           </Card>
 
-          <Card><CardHeader><CardTitle style={{ fontSize: 16 }}>Pesquisar uma URL</CardTitle><p className="card-helper">Use a pesquisa manual para uma nova oportunidade que ainda não está no catálogo.</p></CardHeader><CardBody><form className="sentinel-manual" onSubmit={addManual}><Input type="url" value={manualUrl} onChange={(event) => setManualUrl(event.target.value)} placeholder="https://programa.org/inscricoes" disabled={!perms.canWrite || discovering} /><Button type="submit" variant="outline" iconLeft={Ic('search', 'ico-xs')} disabled={!manualUrl.trim() || !perms.canWrite || discovering}>Pesquisar URL</Button></form></CardBody></Card>
-          <Card flat>
+          <Card><CardHeader><CardTitle style={{ fontSize: 16 }}>Pesquisar uma URL</CardTitle><p className="card-helper">Use a pesquisa manual para uma nova oportunidade que ainda não está no catálogo.</p></CardHeader><CardBody><form className="sentinel-manual" onSubmit={addManual}><Input type="url" value={manualUrl} onChange={(event) => setManualUrl(event.target.value)} placeholder="https://programa.org/inscricoes" disabled={!perms.canWrite || manualBusy} /><Button type="submit" variant="outline" iconLeft={Ic('search', 'ico-xs')} disabled={!manualUrl.trim() || !perms.canWrite || manualBusy}>Pesquisar URL</Button></form></CardBody></Card>          <Card flat>
             <CardHeader className="section-card-header">
               <div>
                 <CardTitle style={{ fontSize: 16 }}>Resultados por fonte</CardTitle>
@@ -948,33 +1198,13 @@ export default function Sentinel({ perms, opportunities = [], catalogLoading = f
             </CardHeader>
             <CardBody style={{ paddingTop: 8 }}>
               {filteredPosts.length === 0 ? <div className="workflow-empty">Nenhum registro neste filtro.</div> : logFilter === 'qualified' ? (
-                <>
-                  {qualifiedNew.length === 0 && qualifiedRegistered.length === 0 && <div className="workflow-empty">Nenhum registro neste filtro.</div>}
-                  {qualifiedNew.length > 0 && (
-                    <div className="research-proposals">
-                      {qualifiedNew.map((post) => (
-                        <QualifiedPostCard key={post.id} post={post} onApprove={aprovarPost} onReject={rejeitarPost} onDismiss={dismissarPost} busy={postActionBusy === post.id} canWrite={perms.canWrite} />
-                      ))}
-                    </div>
-                  )}
-                  {qualifiedRegistered.length > 0 && (
-                    <details className="sentinel-source-details" style={{ marginTop: qualifiedNew.length > 0 ? 16 : 0 }}>
-                      <summary>Oportunidades já cadastradas<span>{countLabel(qualifiedRegistered.length, 'item')}</span></summary>
-                      <div className="sentinel-source-details__body">
-                        {qualifiedRegistered.map((post) => (
-                          <div className="sentinel-log-row" key={post.id} style={{ alignItems: 'center' }}>
-                            <div className="sentinel-log-main">
-                              <div className="sentinel-log-meta">
-                                <strong>{post.extracted?.title || post.opportunity?.title}</strong>
-                                <Badge variant="neutral">Oportunidade já cadastrada · {post.opportunity.status === 'Aprovada' ? 'publicada' : post.opportunity.status === 'Encerrada' ? 'inscrições encerradas' : post.opportunity.status}</Badge>
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </details>
-                  )}
-                </>
+                qualifiedNew.length === 0 ? <div className="workflow-empty">Nada esperando decisão agora — o que já foi decidido não fica acumulando aqui.</div> : (
+                  <div className="research-proposals">
+                    {qualifiedNew.map((post) => (
+                      <QualifiedPostCard key={post.id} post={post} onApprove={aprovarPost} onReject={rejeitarPost} onDismiss={dismissarPost} busy={postActionBusy === post.id} canWrite={perms.canWrite} />
+                    ))}
+                  </div>
+                )
               ) : (
                 <div className="sentinel-log">{filteredPosts.map((post) => { const status = SENTINEL_STATUS[post.status] || SENTINEL_STATUS.pending; return <article className="sentinel-log-row" key={post.id}><div className="sentinel-score">{post.score}</div><div className="sentinel-log-main"><div className="sentinel-log-meta"><strong>{post.source_type === 'manual' ? 'Entrada manual' : post.source_type === 'web' ? (post.owner_username || 'Web') : `@${post.owner_username || 'instagram'}`}</strong><span>{formatDate(post.processed_at || post.created_at)}</span><Badge variant={status.variant} dot>{status.label}</Badge></div><p>{post.opportunity?.title || post.caption || post.source_url}</p>{post.error && <small className="sentinel-log-error">{post.error}</small>}<DiscoveryDetails post={post} /></div><a className="row-action" href={post.source_url} target="_blank" rel="noreferrer" aria-label="Abrir fonte">{Ic('external-link', 'ico-sm')}</a></article>; })}</div>
               )}
@@ -991,16 +1221,30 @@ export default function Sentinel({ perms, opportunities = [], catalogLoading = f
               const status = RESEARCH_RUN_STATUS[run.status] || RESEARCH_RUN_STATUS.running;
               const remaining = run.requested_count - run.processed_count;
               const resumable = run.run_type === 'catalog_review' && (remaining > 0 || run.status === 'running');
+              // Cancelável de verdade (o loop em api/cron/scrape-sources.js
+              // olha pra sentinel_research_runs.status entre um item e outro)
+              // só pra web_research. Aparece pra QUALQUER execução travada em
+              // "running"/"cancelling" — não só a que esta aba abriu — porque
+              // é exatamente isso que substitui o antigo "Destravar
+              // pendentes": em vez de um botão cego que soltava tudo que
+              // estivesse preso há 10 minutos em qualquer execução, agora dá
+              // pra ver qual execução específica ainda está rodando (mesmo
+              // depois de fechar a aba ou a function ter estourado o tempo) e
+              // cancelar só ela — o próprio cancelamento já devolve os itens
+              // presos em "pending" daquela execução pra fila.
+              const cancelavel = run.run_type === 'web_research' && (run.status === 'running' || run.status === 'cancelling');
               const inspected = String(inspectedRunId) === String(run.id);
               return (
                 <article className="research-run-row" data-selected={inspected} key={run.id}>
-                  <div className="research-run-mark">{Ic(run.run_type === 'catalog_review' ? 'refresh-cw' : run.run_type === 'manual' ? 'link' : 'radar', 'ico-sm')}</div>
+                  <div className="research-run-mark">{Ic(run.run_type === 'catalog_review' ? 'refresh-cw' : run.run_type === 'manual' ? 'link' : run.run_type === 'enrichment' ? 'sparkles' : 'radar', 'ico-sm')}</div>
                   <div><strong>{RUN_TYPES[run.run_type]}</strong><small>{formatDate(run.started_at, true)} · <Usage run={run} /></small></div>
                   <div className="research-run-count"><strong>{run.processed_count}/{run.requested_count}</strong><span>{run.requested_count === 1 ? 'processada' : 'processadas'}</span></div>
+                  {run.failed_count > 0 && <Badge variant="danger" dot>{countLabel(run.failed_count, 'falha', 'falhas')}</Badge>}
                   <Badge variant={status.variant} dot>{status.label}</Badge>
                   <div className="research-run-actions">
                     <Button variant={inspected ? 'primary' : 'outline'} size="sm" onClick={() => { setInspectedRunId(inspected ? null : run.id); if (!inspected) void hydrateRun(run.id); }}>{inspected ? 'Fechar log' : 'Ver log'}</Button>
                     {resumable && <Button variant="outline" size="sm" onClick={() => resume(run)} disabled={researching}>{remaining > 0 ? `Retomar (${remaining})` : 'Finalizar'}</Button>}
+                    {cancelavel && <Button variant="outline" size="sm" onClick={() => cancelarPesquisa(run.id)} disabled={cancelandoRunId === run.id} iconLeft={Ic('x', 'ico-xs')}>{cancelandoRunId === run.id ? 'Cancelando…' : 'Cancelar'}</Button>}
                   </div>
                 </article>
               );

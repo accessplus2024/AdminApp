@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Badge, Button, Card, CardBody, CardHeader, CardTitle, Input, OpportunityFilters, Select, Tabs, Textarea, useOpportunityFilters } from '../components';
 import { Ic } from '../lib/icons';
 import { buildNewsletterHtml, slugify } from '../lib/newsletterHtml';
+import { isDeadlineWithinNextMonth } from '../lib/deadline';
 import {
   DEFAULT_ISSUE,
   deleteNewsletterIssue,
@@ -96,7 +97,15 @@ export default function Newsletter({ opportunities, perms }) {
   };
   useEffect(() => { refresh(); }, []);
 
-  const publishedOpportunities = useMemo(() => (opportunities || []).filter((opportunity) => opportunity.status === 'Publicada' && opportunity.qualificacao !== 'unqualified'), [opportunities]);
+  // Só oportunidades com prazo dentro do próximo mês (nada vencido, nada
+  // longe demais) — a newsletter é sobre "inscreva-se logo", não um arquivo
+  // de tudo que já foi aprovado algum dia. Prazo contínuo/sem data
+  // reconhecível fica de fora do catálogo aprovado por padrão (ver
+  // src/lib/deadline.js) — pedido explícito.
+  const publishedOpportunities = useMemo(() => (opportunities || []).filter((opportunity) =>
+    opportunity.status === 'Publicada'
+    && opportunity.qualificacao !== 'unqualified'
+    && isDeadlineWithinNextMonth(opportunity.prazo)), [opportunities]);
   const opportunityFilter = useOpportunityFilters(publishedOpportunities);
   const selectedIds = useMemo(() => new Set(entries.map((entry) => String(entry.opportunity_id))), [entries]);
   const available = useMemo(() => opportunityFilter.rows
@@ -260,7 +269,11 @@ export default function Newsletter({ opportunities, perms }) {
                   const last = featured[id];
                   return (
                     <article key={id} className="opportunity-palette-row">
-                      <div><strong>{opportunity.titulo}</strong><span>{opportunity.prazo || 'Prazo não informado'} · {opportunity.custo || 'Custo não informado'}</span>{last && <small>Última newsletter: {formatDate(last.date)}</small>}</div>
+                      <div>
+                        <strong>{opportunity.titulo}</strong>
+                        {last && <Badge variant="warning" dot>Já publicada em {formatDate(last.date)}</Badge>}
+                        <span>{opportunity.prazo || 'Prazo não informado'} · {opportunity.custo || 'Custo não informado'}</span>
+                      </div>
                       <Button variant="ghost" size="icon" onClick={() => addOpportunity(opportunity)} disabled={!perms.canWrite} aria-label={`Adicionar ${opportunity.titulo}`}>{Ic('plus', 'ico-sm')}</Button>
                     </article>
                   );

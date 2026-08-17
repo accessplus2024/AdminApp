@@ -35,6 +35,30 @@ function EditorSection({ title, children }) {
   );
 }
 
+// Únicas opções que o <select> de plataforma abaixo conhece. Um valor que não
+// esteja aqui (ex.: "google", de um resultado de busca salvo automaticamente)
+// não corresponde a nenhuma <option> — o navegador então mostra a PRIMEIRA
+// opção da lista como se estivesse selecionada, mesmo sem o React saber (foi
+// isso que fez um link comum aparecer rotulado "YouTube"). Normalizar pra
+// "website" ao carregar o formulário evita esse engano.
+const KNOWN_RESOURCE_PLATFORMS = new Set(['youtube', 'reddit', 'instagram', 'tiktok', 'website']);
+const normalizeRecursos = (recursos) => (Array.isArray(recursos) ? recursos : []).map((r) => ({
+  ...r, plataforma: KNOWN_RESOURCE_PLATFORMS.has(r.plataforma) ? r.plataforma : 'website',
+}));
+
+// Mesmo problema do platform acima, só que com "Custo": oportunidades salvas
+// antes da regra de só aceitar Bolsa/Gratuito/Totalmente Financiado ficaram
+// com um valor livre no banco (ex.: "$850 por trimestre..."). Um <select>
+// controlado cujo value não bate com NENHUMA <option> faz o navegador mostrar
+// a PRIMEIRA opção da lista como se já estivesse escolhida — então quem edita
+// vê "Bolsa" (primeira da lista) marcado, acha que já está certo, salva sem
+// tocar no campo, e o texto livre antigo continua lá porque o estado do React
+// nunca mudou. Normalizar pra string vazia força o <select> a mostrar
+// "Selecione…" de verdade, então a primeira escolha do usuário conta como
+// mudança real e dispara o onChange.
+const COST_OPTIONS = ['Bolsa', 'Gratuito', 'Totalmente Financiado'];
+const normalizeCusto = (custo) => (COST_OPTIONS.includes(custo) ? custo : '');
+
 export default function OpportunityEditor({ opp, onCancel, onSave, onDelete, onRunSentinel, perms = { canWrite: true } }) {
   const isNew = !opp;
   const unqualified = opp?.qualificacao === 'unqualified';
@@ -42,9 +66,9 @@ export default function OpportunityEditor({ opp, onCancel, onSave, onDelete, onR
   const [form, setForm] = useState({
     titulo: get('titulo', ''), org: get('org', ''), tipo: get('tipo', 'Bolsas de Estudo'),
     link: get('link', ''), lingua: get('lingua', ''),
-    areaAtuacao: get('areaAtuacao', ''), custo: get('custo', 'Gratuito'), formato: get('formato', 'Remoto'),
+    areaAtuacao: get('areaAtuacao', ''), custo: isNew ? 'Gratuito' : normalizeCusto(get('custo', '')), formato: get('formato', 'Remoto'),
     local: get('local', ''), prazo: get('prazo', ''), dataInicio: get('dataInicio', ''),
-    recursos: get('recursos', []),
+    recursos: normalizeRecursos(get('recursos', [])),
     nivel: get('nivel', []), interesse: get('interesse', []),
     inscricoesAbertas: get('inscricoesAbertas', true), destaque: get('destaque', false),
     descricao: get('descricao', ''),
@@ -137,8 +161,10 @@ export default function OpportunityEditor({ opp, onCancel, onSave, onDelete, onR
           </Field>
           <Field label="Custo" htmlFor="ed-c">
             <Select id="ed-c" value={form.custo} onChange={(e) => set('custo', e.target.value)}>
+              {!form.custo && <option value="" disabled>Selecione…</option>}
               {F('custo').map((o) => <option key={o}>{o}</option>)}
             </Select>
+            {!form.custo && <small style={{ color: 'var(--danger, #c0392b)' }}>Valor antigo não reconhecido (provavelmente um preço em dinheiro). Escolha uma opção e salve para corrigir.</small>}
           </Field>
         </div>
       </EditorSection>

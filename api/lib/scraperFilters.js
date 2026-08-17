@@ -63,6 +63,23 @@ export function passaFiltro(item, filtros) {
   return { passou: faltou.length === 0, motivo: faltou.length ? `faltou: ${faltou.join(', ')}` : 'ok' };
 }
 
+// Pontuação — antes só o Instagram tinha isso (scorePost em api/sentinel.js);
+// os candidatos do scraper de sites sempre entravam na fila com `score: 0`
+// fixo (nunca foi calculado pra eles). Não muda o que entra na fila
+// (passaFiltro continua sendo o corte) — só dá um número útil pra ordenar a
+// revisão (o quanto mais forte um item bateu nível+financeiro+internacional,
+// mais alto), igual ao que já existe pro Instagram.
+export function pontuarItem(item, filtros) {
+  const texto = item?.texto || '';
+  let pontos = 0;
+  if (batePalavras(texto, filtros.nivelForte || [])) pontos += 5;
+  else if (batePalavras(texto, filtros.nivelFraco || [])) pontos += 2;
+  if (batePalavras(texto, filtros.financeiro || [])) pontos += 2;
+  if (batePalavras(texto, filtros.internacional || [])) pontos += 1;
+  if (filtros.aceitarNacionalidade && batePalavras(texto, filtros.aceitarNacionalidade)) pontos += 1;
+  return pontos;
+}
+
 // Só palavras de ligação, sem nenhum peso próprio (nunca vão ser o que
 // diferencia um título de outro) — bem menor que a lista antiga de propósito:
 // uma lista grande de palavras "genéricas" (que incluía coisas como o ano e

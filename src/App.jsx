@@ -6,6 +6,7 @@ import {
   fetchOpportunities, createOpportunity, updateOpportunity, deleteOpportunity,
   formParaLinha, idDoBanco, isSupabaseConfigured,
 } from './lib/opportunities';
+import { enrichApprovedOpportunityNow } from './lib/scraperWeb';
 import { signInWithGoogle, signOut, getSession, onAuthChange, getMyRole, upsertMyProfile } from './lib/auth';
 import Login from './screens/Login';
 import AppShell from './screens/AppShell';
@@ -133,12 +134,37 @@ export default function App() {
     const novoUi = o.status === 'Publicada' ? 'Rascunho' : 'Publicada';
     if (isSupabaseConfigured) {
       try {
-        const upd = await updateOpportunity(idDoBanco(o),
-          { status: novoUi === 'Publicada' ? 'Aprovada' : 'Revisar' });
+        // Publicar é uma aprovação humana explícita: se o Sentinel tinha
+        // deixado a elegibilidade como "pending" (badge "Elegibilidade
+        // incerta — revisar"), a revisão manual da pessoa já resolveu essa
+        // dúvida, então limpamos o status de qualificação junto — senão o
+        // aviso de incerteza continua aparecendo pra sempre, mesmo depois de
+        // aprovada. Ao despublicar (voltar pra Rascunho) não mexemos na
+        // qualificação: isso é só um recuo de visibilidade, não uma
+        // reavaliação de elegibilidade.
+        const patch = { status: novoUi === 'Publicada' ? 'Aprovada' : 'Revisar' };
+        if (novoUi === 'Publicada' && o.qualificacao === 'pending') {
+          patch.qualification_status = 'qualified';
+          patch.qualification_reason = 'Revisado e aprovado manualmente por um administrador.';
+        }
+        const upd = await updateOpportunity(idDoBanco(o), patch);
         Object.assign(o, upd);
+        // Assim que aprova, já dispara a busca de links extras (vídeo,
+        // cobertura, discussão) via Serper/YouTube/Reddit — antes isso só
+        // rodava num cron diário automático (removido a pedido) e só pra
+        // quem tinha sido aprovado nas últimas 72h; agora acontece na hora,
+        // pra qualquer aprovação. É "apoio": nunca deve travar a aprovação
+        // nem mostrar erro pro usuário se falhar (chave ausente, rate limit
+        // etc.) — só registra no console.
+        if (novoUi === 'Publicada') {
+          enrichApprovedOpportunityNow(idDoBanco(o)).catch((e) => {
+            console.error('Enriquecimento automático falhou:', e.message);
+          });
+        }
       } catch (e) { alert('Erro ao mudar status: ' + e.message); return; }
     } else {
       o.status = novoUi; o.inscricoesAbertas = novoUi === 'Publicada';
+      if (novoUi === 'Publicada' && o.qualificacao === 'pending') o.qualificacao = 'qualified';
     }
     setRoute({ mode: 'detail', opp: o }); rerender();
   };

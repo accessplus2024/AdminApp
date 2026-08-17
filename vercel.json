@@ -1,12 +1,10 @@
 {
-  "crons": [
-    {
-      "path": "/api/cron/scrape-sources",
-      "schedule": "0 13 * * *"
-    }
-  ],
   "functions": {
     "api/cron/scrape-sources.js": {
+      "maxDuration": 300,
+      "memory": 2048
+    },
+    "api/sentinel.js": {
       "maxDuration": 300,
       "memory": 2048
     }

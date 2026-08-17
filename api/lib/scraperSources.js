@@ -9,10 +9,27 @@
 // pedem pra uma IA identificar quais links são de programas de verdade
 // (api/lib/listingExtractor.js), já que a página inteira mistura menu/navegação
 // com as oportunidades. São as fontes mais caras e menos confiáveis desta lista —
-// foram desligadas antes porque mesmo um navegador real só trazia menu/catálogo,
-// não as oportunidades (o conteúdo fica atrás de busca/filtro interativo). Ligadas
-// de novo a pedido, mas vale observar os primeiros resultados com atenção.
+// foram tentadas de novo em 2026-08 (Stand Out Search, SnowDay, Pathspire) e
+// removidas de vez logo depois: mesmo com Chromium de verdade, só trazem
+// menu/catálogo, nunca as oportunidades (o conteúdo fica atrás de busca/filtro
+// interativo que só existe depois de cliques do usuário). Ver comentário junto
+// de FONTES abaixo antes de tentar religar qualquer uma delas.
 
+// Removidas em 2026-08-17, checado ao vivo (fetch direto, fora do app):
+// - Stand Out Search / Pathspire: a página bruta que o servidor entrega é só
+//   a casca do app (734 e 94 caracteres de texto) — a lista de programas de
+//   verdade só existe depois de JavaScript rodar no navegador do usuário e
+//   chamar uma API própria. Mesmo com Chromium de verdade (já tentado antes,
+//   ver histórico), só trazia menu/catálogo, nunca as oportunidades — não
+//   vale o custo de manter ligado sem reescrever pra imitar cliques/filtros
+//   de verdade dentro do navegador.
+// - SnowDay: a própria URL configurada (/search/free) devolve HTTP 404 — o
+//   site mudou de estrutura. Mesmo corrigindo pra /search, é a mesma
+//   situação das outras duas (SPA sem conteúdo no HTML bruto).
+// - Admissions Angle: a URL não é um feed que recebe posts novos — é UM
+//   artigo específico ("melhores programas de matemática de verão"), sempre
+//   com a mesma lista fixa. Reprocessar isso toda semana nunca traz nada
+//   novo, só reencontra os mesmos itens de sempre.
 export const FONTES = [
   { nome: 'Opportunity Desk', url: 'https://opportunitydesk.org', metodo: 'wp', tipo: 'feed', ativo: true },
   { nome: 'Bright Scholarship', url: 'https://brightscholarship.com', metodo: 'wp', tipo: 'feed', ativo: true },
@@ -33,22 +50,15 @@ export const FONTES = [
   },
   { nome: 'OYAOP', url: 'https://oyaop.com', metodo: 'wp', tipo: 'feed', ativo: true },
 
-  // Reativadas a pedido — SPAs que exigem um navegador real pra renderizar.
-  { nome: 'Stand Out Search', url: 'https://www.standoutsearch.com', metodo: 'js', tipo: 'listagem', ativo: true },
-  { nome: 'SnowDay', url: 'https://www.snow.day/search/free', metodo: 'js', tipo: 'listagem', ativo: true },
-  { nome: 'Pathspire', url: 'https://pathspire.net/browse.html', metodo: 'js', tipo: 'listagem', ativo: true },
-  {
-    nome: 'Admissions Angle',
-    url: 'https://www.admissionsangle.com/blog/best-math-summer-programs-for-high-schoolers',
-    metodo: 'estatico', tipo: 'listagem', ativo: true,
-  },
-
   // Reddit não é "um site" com URL fixa — é uma busca em vários subreddits, cada
   // um com suas próprias queries (ver api/lib/redditScraper.js). Aparece aqui só
   // como um marcador pro resto do pipeline (metodo 'reddit' tem um caminho próprio
-  // em api/cron/scrape-sources.js). Reddit é conhecido por bloquear/limitar IPs de
-  // datacenter (o que a Vercel parece pra eles) mais que IPs residenciais — pode
-  // simplesmente vir vazio ou com 429 em produção mesmo com a lógica certa.
+  // em api/cron/scrape-sources.js). É uma fonte selecionável igual às outras na
+  // tela — vem marcada por padrão (não precisa lembrar de marcar), mas dá pra
+  // desmarcar ou deixar como a única marcada pra rodar sozinha. Reddit é
+  // conhecido por bloquear/limitar IPs de datacenter (o que a Vercel parece pra
+  // eles) mais que IPs residenciais — pode simplesmente vir vazio ou com 429 em
+  // produção mesmo com a lógica certa.
   { nome: 'Reddit', url: 'https://reddit.com', metodo: 'reddit', tipo: 'feed', ativo: true },
 ];
 
@@ -58,7 +68,10 @@ export const FONTES = [
 export const FONTES_SEMPRE_ATIVAS = new Set(['opportunity desk', 'bright scholarship', 'oyaop']);
 
 export const FILTROS = {
-  dias: 30,
+  // 7, não 30 — combina com o ritmo semanal de coleta manual (sem cron
+  // diário automático, ver vercel.json): a cada rodada, só interessa o que
+  // é novo desde a última vez, não reprocessar um mês inteiro toda semana.
+  dias: 7,
   maxPorSite: 60,
   exigirNivel: true,
   exigirFinanceiro: true,
@@ -113,7 +126,8 @@ export const FILTROS = {
   // nível superior/profissional inequívoco: derruba mesmo que bata nível+financeiro
   excluir: [
     'postdoc', 'postdoctoral', 'phd', 'ph.d', 'doctoral', 'doctorate', "master's", 'masters',
-    "master's degree", 'mba', 'postgraduate', 'post-graduate', 'graduate student',
+    "master's degree", 'master of', 'msc', 'm.sc', 'international master', 'joint master',
+    'erasmus mundus', 'mba', 'postgraduate', 'post-graduate', 'graduate student',
     'graduate students', 'graduate programme', 'graduate program', 'undergraduate',
     'undergraduates', 'undergraduate degree', 'bachelor', "bachelor's", 'university student',
     'university students', 'college student', 'college students', 'faculty', 'professor',

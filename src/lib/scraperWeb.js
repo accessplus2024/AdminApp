@@ -9,9 +9,13 @@ import { fetchSentinelPosts } from './sentinel';
 
 // Mantenha esta lista igual aos "nome" em api/lib/scraperSources.js — é só para
 // mostrar os botões; a fonte de verdade de qual site realmente roda é o backend.
+// Reddit está aqui, mas marcado por padrão (ver estado inicial de
+// webFontesEscolhidas em Sentinel.jsx): continua não exigindo esforço extra
+// pra rodar — já vem selecionado — mas agora pode ser desmarcado sozinho pra
+// rodar só as outras fontes, ou deixado como a ÚNICA marcada pra rodar só o
+// Reddit, sem precisar de um botão separado.
 export const WEB_SOURCES = [
-  'Opportunity Desk', 'Bright Scholarship', 'Opportunities for Youth', 'OYAOP',
-  'Stand Out Search', 'SnowDay', 'Pathspire', 'Admissions Angle', 'Reddit',
+  'Opportunity Desk', 'Bright Scholarship', 'Opportunities for Youth', 'OYAOP', 'Reddit',
 ];
 
 async function chamarScraper(body) {
@@ -36,10 +40,26 @@ async function chamarScraper(body) {
 export const collectSources = (sites) => chamarScraper({ action: 'collect', ...(sites && sites.length ? { sites } : {}) });
 
 // Fase 2 — a etapa que custa: só roda pros itens escolhidos (`postIds`) ou pros
-// N mais antigos da fila (`maxCandidates`, padrão 10).
-export const researchCandidates = ({ postIds, maxCandidates } = {}) => chamarScraper({
-  action: 'research', ...(postIds ? { postIds } : {}), ...(maxCandidates ? { maxCandidates } : {}),
-});
+// N mais antigos da fila (`maxCandidates`, padrão 10). `onRunId`, se passado,
+// é chamado assim que o id da execução existe (antes de esperar a pesquisa
+// terminar) — é o que permite ao botão "Cancelar" existir, já que sem isso
+// o navegador só saberia o runId depois que tudo já tivesse acabado.
+export const researchCandidates = async ({ postIds, maxCandidates, onRunId } = {}) => {
+  const { runId } = await chamarScraper({
+    action: 'research_start', ...(postIds ? { postIds } : {}), ...(maxCandidates ? { maxCandidates } : {}),
+  });
+  onRunId?.(runId);
+  return chamarScraper({
+    action: 'research', runId, ...(postIds ? { postIds } : {}), ...(maxCandidates ? { maxCandidates } : {}),
+  });
+};
+
+// Cancela uma pesquisa em andamento (cooperativo — ver comentário em
+// pesquisarCandidatos no backend): os itens já em processamento terminam
+// normalmente, mas nenhum item novo é iniciado, e o resto volta pra fila.
+// Também libera na hora qualquer item dessa execução preso em "pending" —
+// não existe mais um botão separado de "destravar pendentes" pra isso.
+export const cancelResearch = (runId) => chamarScraper({ action: 'cancel_research', runId });
 
 // Exclui candidatos já processados da tabela "Já pesquisados". O backend nunca
 // deixa apagar uma linha "pending" (pesquisa em andamento) — só serve pra
@@ -57,6 +77,15 @@ export const findEnrichmentCandidates = (opportunityId) => chamarScraper({ actio
 // adicionar. `resources` = [{ platform, title, url }, ...] dos itens marcados.
 export const confirmEnrichment = (opportunityId, resources) => chamarScraper({
   action: 'enrich_confirm', opportunityId, resources,
+});
+
+// Versão 100% automática (sem devolver lista pra revisão humana) — chamada
+// assim que uma oportunidade é aprovada/publicada, pra já sair com os links
+// extras (vídeo, cobertura, discussão) sem esperar nenhuma janela de tempo.
+// Só entra em `resources` o que a IA marcar "sugerido" + "confiança alta";
+// erro aqui nunca deve travar a aprovação em si — sempre chame com .catch.
+export const enrichApprovedOpportunityNow = (opportunityId) => chamarScraper({
+  action: 'enrich_auto', opportunityId,
 });
 
 // Candidatos ainda não pesquisados, prontos pra um humano escolher.
