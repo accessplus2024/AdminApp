@@ -26,14 +26,15 @@ const YOUTH_SIGNALS = ['youth', 'young people', 'teenager', 'teen', '16', '17', 
 const FUNDING_SIGNALS = ['funded', 'fully funded', 'free', 'scholarship', 'grant', 'stipend', 'fellowship', 'financial aid', 'all expenses'];
 const BRAZIL_SIGNALS = ['brazil', 'brazilian', 'all nationals', 'open to all', 'all countries'];
 const UNIVERSITY_PENALTIES = ['phd', 'ph.d', 'doctorate', 'doctoral', 'postdoc', 'postdoctoral', "master's", 'masters', 'master degree', 'master of', 'professor', 'faculty', 'researcher', 'research grant', "bachelor's", 'bachelors', 'undergraduate degree'];
-const REVIEW_FIELDS = ['title', 'description', 'link', 'deadline', 'areas', 'level', 'location', 'cost', 'language', 'keywords', 'eligibility', 'process', 'applicants', 'additionals', 'type', 'status', 'qualification_status', 'qualification_reason'];
+const REVIEW_FIELDS = ['title', 'description', 'link', 'deadline', 'areas', 'level', 'audience', 'location', 'cost', 'language', 'keywords', 'eligibility', 'process', 'applicants', 'additionals', 'type', 'status', 'qualification_status', 'qualification_reason'];
 const MODEL_REVIEW_FIELDS = REVIEW_FIELDS.filter((field) => field !== 'status' && !field.startsWith('qualification_'));
-const ARRAY_FIELDS = new Set(['areas', 'level', 'keywords']);
+const ARRAY_FIELDS = new Set(['areas', 'level', 'keywords', 'audience']);
 const LINE_LIST_FIELDS = new Set(['eligibility', 'applicants']);
 const REQUIRED_TEXT_FIELDS = new Set(['title', 'type', 'status']);
 const CONTROLLED_VALUES = {
   areas: new Set(['STEM', 'Humanas', 'Meio Ambiente', 'Linguagens', 'Artes']),
   level: new Set(['Ensino Médio', 'Fundamental', 'Gap Year']),
+  audience: new Set(['Negros', 'LGBT', 'Baixa Renda', 'Indígenas', 'Deficientes', 'Meninas', 'Escola Pública']),
   type: new Set(['Programas Acadêmicos', 'Olimpíadas Científicas', 'Competições', 'Competições de Escrita', 'Mentorias', 'Bolsas de Estudo', 'Programas de Intercâmbio', 'MUNs', 'Estágios']),
   status: new Set(['Aprovada', 'Revisar', 'Rascunho', 'Encerrada']),
   qualification_status: new Set(['pending', 'qualified', 'unqualified']),
@@ -928,6 +929,7 @@ IDIOMA E TAXONOMIA:
 - areas: STEM, Humanas, Meio Ambiente, Linguagens ou Artes.
 - level: Ensino Médio, Fundamental ou Gap Year — escolha pelo que a fonte exige, não pelo público genérico ("jovens"/"youth"/"teen"). Ensino Médio = aberto a quem AINDA ESTÁ cursando o ensino médio (secondary/high school student). Fundamental = aberto a quem ainda está no fundamental (younger student, middle school). Gap Year = exige ensino médio JÁ CONCLUÍDO como pré-requisito (ex.: "high school graduate", "completed secondary education", "before starting university/college", programa entre o ensino médio e a faculdade) — mesmo que a idade típica seja parecida com a de um aluno de ensino médio, se a fonte pede o ensino médio já concluído, é Gap Year, não Ensino Médio. Se a fonte exigir ensino superior (university/college) já em andamento ou concluído, isso não é nenhum dos três — sinal de que a oportunidade não deveria ter chegado até aqui; registre isso como gap em vez de forçar um nível.
 - type: Programas Acadêmicos, Olimpíadas Científicas, Competições, Competições de Escrita, Mentorias, Bolsas de Estudo, Programas de Intercâmbio, MUNs ou Estágios.
+- audience aceita SOMENTE estes valores, um ou mais quando comprovados: Negros, LGBT, Baixa Renda, Indígenas, Deficientes, Meninas, Escola Pública. Só inclua um valor quando a fonte exigir, priorizar ou direcionar explicitamente a oportunidade a esse público (cota, elegibilidade restrita, programa dedicado) — não infira a partir de linguagem genérica de diversidade/inclusão sem critério concreto. Não repita nível escolar (isso é level) nem tema (isso é areas). Se for aberta a qualquer estudante, sem recorte, use lista vazia.
 - keywords deve ter de 3 a 8 nomes seletivos do vocabulário ativo, sobre temas, atividades, habilidades, entregáveis ou benefícios. Não use formato, idioma, custo, tipo, nível escolar ou público demográfico como tag.
 ${allowedTags.length ? `- Vocabulário ativo permitido para keywords: ${allowedTags.join(', ')}.` : ''}
 
@@ -946,7 +948,7 @@ ${ELIGIBILITY_PROCESS_GUIDANCE}
 Cada campo preenchido deve ter evidence com citação literal e a URL exata da página onde o trecho foi encontrado. Se veio de inscrições, regulamento ou outra página adjacente, use essa URL, não a página principal.
 
 Responda SOMENTE com JSON cru:
-{"title":"Nome oficial","description":"Programa de verão de seis semanas nos Estados Unidos voltado a estudantes interessados em ciência de dados aplicada a problemas sociais. Combina oficinas técnicas com profissionais da área, um projeto em grupo desenvolvido ao longo do programa e mentoria individual até a apresentação final. Hospedagem, alimentação e material didático são cobertos pela organização, e os participantes recebem certificado internacional de conclusão.","link":"URL oficial","deadline":"4 de setembro de 2026","areas":["STEM"],"level":["Ensino Médio"],"location":"Remoto","cost":"Gratuito","language":"Inglês","keywords":["Inovação social","Gestão de projetos","Liderança"],"eligibility":"Estar matriculado","process":"Preencha o formulário. Anexe os documentos solicitados. Envie a candidatura.","applicants":null,"additionals":null,"type":"Programas Acadêmicos","evidence":{"deadline":{"quote":"Applications close on September 4, 2026","source_url":"https://example.org/apply","kind":"application_deadline"}}}`;
+{"title":"Nome oficial","description":"Programa de verão de seis semanas nos Estados Unidos voltado a estudantes interessados em ciência de dados aplicada a problemas sociais. Combina oficinas técnicas com profissionais da área, um projeto em grupo desenvolvido ao longo do programa e mentoria individual até a apresentação final. Hospedagem, alimentação e material didático são cobertos pela organização, e os participantes recebem certificado internacional de conclusão.","link":"URL oficial","deadline":"4 de setembro de 2026","areas":["STEM"],"level":["Ensino Médio"],"audience":[],"location":"Remoto","cost":"Gratuito","language":"Inglês","keywords":["Inovação social","Gestão de projetos","Liderança"],"eligibility":"Estar matriculado","process":"Preencha o formulário. Anexe os documentos solicitados. Envie a candidatura.","applicants":null,"additionals":null,"type":"Programas Acadêmicos","evidence":{"deadline":{"quote":"Applications close on September 4, 2026","source_url":"https://example.org/apply","kind":"application_deadline"}}}`;
 }
 
 export function normalizeDiscoveryResult(parsed, research, fallbackUrl, allowedTags = []) {
@@ -1022,6 +1024,7 @@ export function normalizeDiscoveryResult(parsed, research, fallbackUrl, allowedT
   result.description = result.description || 'Descrição ainda não confirmada. Revise antes de publicar.';
   result.level = result.level || [];
   result.areas = result.areas || [];
+  result.audience = result.audience || [];
   result.keywords = normalizeKeywordTags(result.keywords || [], allowedTags);
   result.type = result.type || 'Programas Acadêmicos';
   const closedEvidence = findExplicitClosedApplications(research.sources, result);
@@ -1124,7 +1127,7 @@ async function groundUrl(url, caption = '', ownerUsername = '', manual = false, 
 // os que carregam substância (não local/idioma/tipo, que raramente mudam e
 // geram diferença de fiapo). Usado só pra decidir SE vale mandar de volta
 // pra revisão, não pra decidir o valor final (isso a pessoa revisando faz).
-const CONTENT_DIFF_FIELDS = ['description', 'eligibility', 'process', 'applicants', 'additionals', 'cost', 'deadline'];
+const CONTENT_DIFF_FIELDS = ['description', 'eligibility', 'process', 'applicants', 'additionals', 'cost', 'deadline', 'audience'];
 
 function fieldText(value) {
   return normalizedText(Array.isArray(value) ? value.join(' ') : String(value || ''));
@@ -1177,6 +1180,7 @@ async function findOrCreateOpportunity(supabase, extracted, { refreshOnDuplicate
         deadline: extracted.deadline || null,
         areas: extracted.areas?.length ? extracted.areas : existing.areas,
         level: extracted.level?.length ? extracted.level : existing.level,
+        audience: extracted.audience?.length ? extracted.audience : existing.audience,
         location: extracted.location || existing.location,
         cost: extracted.cost || existing.cost,
         language: extracted.language || existing.language,
@@ -1207,7 +1211,7 @@ async function findOrCreateOpportunity(supabase, extracted, { refreshOnDuplicate
 
   const row = {
     title: extracted.title, description: extracted.description || '', link: canonicalizeOpportunityUrl(extracted.link),
-    deadline: extracted.deadline || null, areas: extracted.areas || [], level: extracted.level || [], location: extracted.location || null,
+    deadline: extracted.deadline || null, areas: extracted.areas || [], level: extracted.level || [], audience: extracted.audience || [], location: extracted.location || null,
     cost: extracted.cost || null, language: extracted.language || null, keywords: normalizeKeywordTags(extracted.keywords || []),
     eligibility: Array.isArray(extracted.eligibility) ? extracted.eligibility.join('\n') : String(extracted.eligibility || ''),
     process: extracted.process || null, applicants: extracted.applicants || null,
@@ -1449,6 +1453,7 @@ IDIOMA, CONDIÇÕES E TAXONOMIA:
 - areas aceita somente: STEM, Humanas, Meio Ambiente, Linguagens, Artes. Classifique pelo tema da oportunidade, não pelas modalidades de envio.
 - level aceita somente: Ensino Médio, Fundamental, Gap Year — escolha pelo pré-requisito exigido, não pelo público genérico ("jovens"/"youth"/"teen"). Ensino Médio = exige estar cursando o ensino médio agora. Fundamental = exige estar no fundamental agora. Gap Year = exige ensino médio JÁ CONCLUÍDO (ex.: "high school graduate", "completed secondary education", programa entre o ensino médio e a faculdade) — mesmo com idade parecida à de um aluno de ensino médio, se o pré-requisito é o ensino médio já concluído, corrija para Gap Year, não Ensino Médio. Revise esse campo também em oportunidades já existentes quando a fonte deixar claro qual dos dois é o caso.
 - type aceita somente: Programas Acadêmicos, Olimpíadas Científicas, Competições, Competições de Escrita, Mentorias, Bolsas de Estudo, Programas de Intercâmbio, MUNs, Estágios.
+- audience aceita SOMENTE estes valores, um ou mais quando comprovados: Negros, LGBT, Baixa Renda, Indígenas, Deficientes, Meninas, Escola Pública. Só proponha um valor quando a fonte exigir, priorizar ou direcionar explicitamente a oportunidade a esse público (cota, elegibilidade restrita, programa dedicado) — não infira a partir de linguagem genérica de diversidade/inclusão sem critério concreto, e remova valores existentes sem essa comprovação. Não repita nível escolar (isso é level) nem tema (isso é areas). Se for aberta a qualquer estudante, sem recorte, proponha lista vazia.
 - Não inclua status, qualification_status nem qualification_reason em updates. A disponibilidade é calculada separadamente a partir dos prazos e a qualificação vem do veredito validado do dossiê; uma nunca substitui a outra.
 - keywords deve ter de 3 a 8 nomes seletivos do vocabulário ativo, sobre temas, atividades, habilidades, entregáveis ou benefícios. Não use formato, idioma, custo, tipo, nível escolar ou público demográfico como tag.
 ${allowedTags.length ? `- Vocabulário ativo permitido para keywords: ${allowedTags.join(', ')}.` : ''}

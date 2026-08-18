@@ -7,7 +7,7 @@ import { mapOpportunities, mapOpportunity } from './mapOpportunity';
 // ---------------------------------------------------------------------------
 const OPPORTUNITY_SELECT = [
   'id', 'title', 'description', 'link', 'deadline', 'areas', 'level', 'location',
-  'cost', 'language', 'keywords', 'eligibility', 'process', 'applicants',
+  'audience', 'cost', 'language', 'keywords', 'eligibility', 'process', 'applicants',
   'additionals', 'resources', 'status', 'review', 'created_at', 'type',
   'sentinel_discovery_key', 'qualification_status', 'qualification_reason',
 ].join(',');
@@ -55,7 +55,7 @@ export function formParaLinha(form, uiStatus, existente = null) {
     description: form.descricao || '',
     type: form.tipo || '',
     level: form.nivel || [],
-    audience: [],
+    audience: form.publicoAlvo || [],
     areas: form.interesse || [],
     cost: form.custo || null,
     location: serializeOpportunityLocation(form),

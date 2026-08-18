@@ -163,7 +163,7 @@ export async function resumeCatalogResearch(run, onProgress) {
   return callSentinel({ action: 'review-finish', runId: run.id });
 }
 
-const ARRAY_EDIT_FIELDS = new Set(['areas', 'level', 'keywords']);
+const ARRAY_EDIT_FIELDS = new Set(['areas', 'level', 'keywords', 'audience']);
 
 export function serializeResearchEdits(edits = {}) {
   return Object.fromEntries(Object.entries(edits).map(([field, value]) => [

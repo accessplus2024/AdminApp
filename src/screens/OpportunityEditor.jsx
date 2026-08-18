@@ -70,6 +70,7 @@ export default function OpportunityEditor({ opp, onCancel, onSave, onDelete, onR
     local: get('local', ''), prazo: get('prazo', ''), dataInicio: get('dataInicio', ''),
     recursos: normalizeRecursos(get('recursos', [])),
     nivel: get('nivel', []), interesse: get('interesse', []),
+    publicoAlvo: get('publicoAlvo', []) || [],
     inscricoesAbertas: get('inscricoesAbertas', true), destaque: get('destaque', false),
     descricao: get('descricao', ''),
     elegibilidade: (get('elegibilidade', []) || []).join('\n'),
@@ -172,6 +173,9 @@ export default function OpportunityEditor({ opp, onCancel, onSave, onDelete, onR
       <EditorSection title="Classificação">
         <Field label="Nível"><Chips options={F('nivel')} value={form.nivel} onToggle={toggleIn('nivel')} /></Field>
         <Field label="Interesse"><Chips options={F('interesse')} value={form.interesse} onToggle={toggleIn('interesse')} /></Field>
+        <Field label="Público-alvo" hint="Marque apenas se a oportunidade tiver recorte ou incentivo explícito para esse público. Deixe em branco se for aberta a qualquer estudante.">
+          <Chips options={F('publicoAlvo')} value={form.publicoAlvo} onToggle={toggleIn('publicoAlvo')} />
+        </Field>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '14px 16px', background: 'var(--neutral-50)', borderRadius: 'var(--radius-md)' }}>
           <Switch label="Inscrições abertas" checked={form.inscricoesAbertas} onChange={(e) => set('inscricoesAbertas', e.target.checked)} />
           <Switch label="Destacar na home"   checked={form.destaque}         onChange={(e) => set('destaque', e.target.checked)} />

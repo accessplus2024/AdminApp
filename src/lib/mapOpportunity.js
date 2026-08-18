@@ -73,6 +73,7 @@ export function mapOpportunity(row) {
     nivel: arr(row.level),                 // text[]
     interesse: arr(row.areas),             // text[]  (as "areas de atuacao")
     areaAtuacao: arr(row.areas).join(', '),
+    publicoAlvo: arr(row.audience),        // text[]  (publico-alvo)
     custo: str(row.cost),
 
     // logistica

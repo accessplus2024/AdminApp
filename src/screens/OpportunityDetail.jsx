@@ -310,6 +310,7 @@ export default function OpportunityDetail({ opp, onBack, onEdit, onDelete, onTog
               <Fact icon="calendar"    label="Prazo de inscrição" value={opp.prazo} />
               <Fact icon="play"        label="Início"             value={opp.dataInicio} />
               <Fact icon="bar-chart-3" label="Nível"              value={opp.nivel.join(' · ')} />
+              <Fact icon="users"       label="Público-alvo"       value={(opp.publicoAlvo || []).join(' · ')} />
               <Fact icon="wallet"      label="Custo"              value={opp.custo} />
               <Fact icon="monitor"     label="Formato"            value={opp.formato} />
               {opp.formato !== 'Remoto' && opp.local && <Fact icon="map-pin" label="Local" value={opp.local} />}

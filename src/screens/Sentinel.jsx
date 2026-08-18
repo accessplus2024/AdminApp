@@ -27,7 +27,7 @@ import { deleteOpportunity, updateOpportunity } from '../lib/opportunities';
 
 const FIELD_LABELS = {
   title: 'Título', description: 'Descrição', link: 'Link', deadline: 'Prazo', areas: 'Áreas',
-  level: 'Nível', location: 'Local/formato', cost: 'Custo',
+  level: 'Nível', audience: 'Público-alvo', location: 'Local/formato', cost: 'Custo',
   language: 'Idioma', keywords: 'Palavras-chave', eligibility: 'Elegibilidade',
   process: 'Sobre o processo', applicants: 'Dicas', additionals: 'Informações adicionais', type: 'Tipo',
   status: 'Disponibilidade', qualification_status: 'Qualificação', qualification_reason: 'Motivo da qualificação',
