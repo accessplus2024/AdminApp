@@ -27,6 +27,49 @@ export function parseCatalogDeadline(value) {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
+// Nomes de mês na mesma convenção que o Sentinel escreve (sem acento na
+// chave, com acento no texto exibido) — usado para converter a data do
+// <input type="date"> de volta pro formato "D de mês de YYYY" do catálogo.
+const MONTH_NAMES_PT = [
+  'janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho',
+  'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro',
+];
+
+// Date -> "4 de setembro de 2026" (mesmo formato que o Sentinel escreve).
+export function formatCatalogDeadline(date) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return '';
+  const day = date.getDate();
+  const month = MONTH_NAMES_PT[date.getMonth()];
+  const year = date.getFullYear();
+  return `${day} de ${month} de ${year}`;
+}
+
+// "4 de setembro de 2026" -> "2026-09-04" (formato que <input type="date">
+// espera). Devolve '' quando o prazo não é uma data completa reconhecível
+// (ex.: "Inscrições contínuas", texto livre antigo, vazio).
+export function catalogDeadlineToInputValue(value) {
+  const date = parseCatalogDeadline(value);
+  if (!date) return '';
+  const y = String(date.getFullYear()).padStart(4, '0');
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+// "2026-09-04" (valor do <input type="date">) -> "4 de setembro de 2026".
+export function inputValueToCatalogDeadline(value) {
+  const match = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return '';
+  const [, y, m, d] = match;
+  return formatCatalogDeadline(new Date(Number(y), Number(m) - 1, Number(d)));
+}
+
+// Texto usado pra prazo de inscrição contínua/rolante — a única exceção sem
+// data completa que o Sentinel também aceita (ver isAcceptableDeadlineOutput
+// em api/sentinel.js).
+export const ROLLING_DEADLINE_TEXT = 'Inscrições contínuas';
+export const isRollingDeadline = (value) => semAcento(value).trim().toLowerCase() === semAcento(ROLLING_DEADLINE_TEXT).toLowerCase();
+
 // true só quando o prazo é uma data de verdade dentro de [hoje, fim do
 // próximo mês] — exclui prazo já vencido e prazo distante demais. Prazo sem
 // data reconhecível (contínuo, "agosto de 2026" sem dia, vazio) devolve

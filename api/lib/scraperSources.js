@@ -50,16 +50,10 @@ export const FONTES = [
   },
   { nome: 'OYAOP', url: 'https://oyaop.com', metodo: 'wp', tipo: 'feed', ativo: true },
 
-  // Reddit não é "um site" com URL fixa — é uma busca em vários subreddits, cada
-  // um com suas próprias queries (ver api/lib/redditScraper.js). Aparece aqui só
-  // como um marcador pro resto do pipeline (metodo 'reddit' tem um caminho próprio
-  // em api/cron/scrape-sources.js). É uma fonte selecionável igual às outras na
-  // tela — vem marcada por padrão (não precisa lembrar de marcar), mas dá pra
-  // desmarcar ou deixar como a única marcada pra rodar sozinha. Reddit é
-  // conhecido por bloquear/limitar IPs de datacenter (o que a Vercel parece pra
-  // eles) mais que IPs residenciais — pode simplesmente vir vazio ou com 429 em
-  // produção mesmo com a lógica certa.
-  { nome: 'Reddit', url: 'https://reddit.com', metodo: 'reddit', tipo: 'feed', ativo: true },
+  // Reddit foi removido daqui (2026-08) a pedido: deixou de ser fonte de
+  // DESCOBERTA automática. Continua disponível só no Enriquecimento (busca
+  // manual e pontual por uma oportunidade já aprovada, ver api/lib/enrichment.js),
+  // que é uma etapa separada com escopo e risco de ruído bem menores.
 ];
 
 // Fontes que normalmente publicam com frequência. Se uma destas voltar com ZERO

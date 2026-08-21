@@ -78,7 +78,36 @@ async function buscarSerper(query) {
   // exatamente o que gerou o rótulo errado relatado.
   return (dados.organic || []).slice(0, 5)
     .filter((r) => r.link)
+    // instagram.com fica de fora daqui: a busca dedicada buscarInstagram()
+    // abaixo já cobre esse domínio e marca "platform: instagram" corretamente
+    // — sem esse filtro, se o Google indexasse por acaso um post do
+    // Instagram nesta busca geral, ele entraria rotulado "website" (ordem de
+    // concat em buscarCandidatosDeEnriquecimento decide qual busca "ganha" o
+    // dedup por URL).
+    .filter((r) => !/(?:^|\.)instagram\.com$/i.test(new URL(r.link).hostname))
     .map((r) => ({ platform: 'website', title: r.title || r.link, url: r.link, snippet: r.snippet || '' }));
+}
+
+// 4ª fonte de enriquecimento (a pedido, 2026-08-21) — não existe API pública
+// de busca do Instagram, então usa o mesmo Serper (busca no Google) com
+// "site:instagram.com" pra achar posts públicos que mencionem a
+// oportunidade. Fica isolado numa função própria (não misturado em
+// buscarSerper) só pra já sair com platform "instagram" certo, sem depender
+// de reclassificar depois.
+async function buscarInstagram(query) {
+  const key = process.env.SERPER_API_KEY;
+  if (!key) throw new Error('SERPER_API_KEY não configurada no servidor.');
+  const resposta = await fetch('https://google.serper.dev/search', {
+    method: 'POST',
+    headers: { 'X-API-KEY': key, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ q: `site:instagram.com ${query}`, num: 5 }),
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!resposta.ok) throw new Error(`Serper (Instagram) respondeu ${resposta.status}`);
+  const dados = await resposta.json();
+  return (dados.organic || []).slice(0, 5)
+    .filter((r) => r.link)
+    .map((r) => ({ platform: 'instagram', title: r.title || r.link, url: r.link, snippet: r.snippet || '' }));
 }
 
 async function buscarYoutube(query) {
@@ -193,16 +222,28 @@ export async function buscarCandidatosDeEnriquecimento(supabase, opportunityId) 
     throw Object.assign(new Error('opportunityId é obrigatório.'), { statusCode: 400 });
   }
   const { data: opportunity, error: fetchError } = await supabase
-    .from('opportunities').select('id, title, description, resources').eq('id', opportunityId).maybeSingle();
+    .from('opportunities').select('id, title, description, resources, status').eq('id', opportunityId).maybeSingle();
   if (fetchError) throw fetchError;
   if (!opportunity) throw Object.assign(new Error('Oportunidade não encontrada.'), { statusCode: 404 });
+  // Reforço no servidor do que a tela Web/Catálogo já esconde (item 7,
+  // 2026-08-21): enriquecimento é apoio pra oportunidade JÁ aprovada — antes
+  // disso ela pode ainda ser rejeitada ou mudar de nome/tema na revisão, e
+  // gastar as 3 buscas + avaliação da IA nisso é desperdício, além do risco
+  // de anexar recursos a algo que nunca vai ao ar com esse título/tema.
+  if (opportunity.status !== 'Aprovada') {
+    throw Object.assign(
+      new Error('Esta oportunidade ainda não foi aprovada — aprove no Catálogo antes de enriquecer.'),
+      { statusCode: 409 },
+    );
+  }
 
   const query = opportunity.title;
   const errors = {};
-  const [serper, youtube, reddit] = await Promise.all([
+  const [serper, youtube, reddit, instagram] = await Promise.all([
     buscarSerper(query).catch((e) => { errors.serper = e.message; return []; }),
     buscarYoutube(query).catch((e) => { errors.youtube = e.message; return []; }),
     buscarReddit(query).catch((e) => { errors.reddit = e.message; return []; }),
+    buscarInstagram(query).catch((e) => { errors.instagram = e.message; return []; }),
   ]);
 
   // Não repete o que já está salvo (de uma pesquisa anterior ou adicionado à
@@ -215,7 +256,7 @@ export async function buscarCandidatosDeEnriquecimento(supabase, opportunityId) 
   // avaliação da IA em paralelo, os dois eram aprovados, e a mesma URL virava
   // dois recursos salvos (o bug relatado de "dois links iguais").
   const vistosNestaRodada = new Set();
-  const brutos = [...serper, ...youtube, ...reddit].filter((c) => {
+  const brutos = [...serper, ...youtube, ...reddit, ...instagram].filter((c) => {
     if (urlsExistentes.has(c.url) || vistosNestaRodada.has(c.url)) return false;
     vistosNestaRodada.add(c.url);
     return true;
@@ -226,7 +267,7 @@ export async function buscarCandidatosDeEnriquecimento(supabase, opportunityId) 
   return {
     query,
     candidatos,
-    porFonte: { serper: serper.length, youtube: youtube.length, reddit: reddit.length },
+    porFonte: { serper: serper.length, youtube: youtube.length, reddit: reddit.length, instagram: instagram.length },
     errors: Object.keys(errors).length ? errors : null,
   };
 }

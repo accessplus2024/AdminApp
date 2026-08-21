@@ -9,13 +9,10 @@ import { fetchSentinelPosts } from './sentinel';
 
 // Mantenha esta lista igual aos "nome" em api/lib/scraperSources.js — é só para
 // mostrar os botões; a fonte de verdade de qual site realmente roda é o backend.
-// Reddit está aqui, mas marcado por padrão (ver estado inicial de
-// webFontesEscolhidas em Sentinel.jsx): continua não exigindo esforço extra
-// pra rodar — já vem selecionado — mas agora pode ser desmarcado sozinho pra
-// rodar só as outras fontes, ou deixado como a ÚNICA marcada pra rodar só o
-// Reddit, sem precisar de um botão separado.
+// Reddit foi removido como fonte de DESCOBERTA (a pedido) — continua disponível
+// só no Enriquecimento (Web.jsx), que é uma etapa separada e manual.
 export const WEB_SOURCES = [
-  'Opportunity Desk', 'Bright Scholarship', 'Opportunities for Youth', 'OYAOP', 'Reddit',
+  'Opportunity Desk', 'Bright Scholarship', 'Opportunities for Youth', 'OYAOP',
 ];
 
 async function chamarScraper(body) {
@@ -121,6 +118,16 @@ export async function fetchProcessedWebCandidates(limit = 50) {
       status: p.status,
       error: p.error,
       opportunityId: p.opportunity_id,
+      // Item 7 (2026-08-21): antes o botão "Enriquecer" aparecia pra
+      // QUALQUER oportunidade criada pelo Sentinel (row.status === 'qualified'
+      // aqui é o status do POST, "virou uma oportunidade" — não o status da
+      // oportunidade em si). Uma oportunidade recém-criada fica "Revisar"/
+      // qualification_status "pending" até alguém aprovar; enriquecer antes
+      // disso busca link extra pra algo que pode nem ser publicado, ou pode
+      // ainda mudar de nome/tema na revisão. fetchSentinelPosts já traz o
+      // join com opportunities — só faltava repassar esse dado pra tela.
+      opportunityStatus: p.opportunity?.status || null,
+      opportunityQualificationStatus: p.opportunity?.qualification_status || null,
       atualizadoEm: p.updated_at || p.processed_at,
     }));
 }

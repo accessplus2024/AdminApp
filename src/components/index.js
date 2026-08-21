@@ -3,6 +3,7 @@ export { Badge } from './Badge';
 export { Card, CardHeader, CardTitle, CardDescription, CardBody, CardFooter } from './Card';
 export { Avatar } from './Avatar';
 export { Input } from './Input';
+export { DatePicker } from './DatePicker';
 export { Textarea } from './Textarea';
 export { Select } from './Select';
 export { Checkbox } from './Checkbox';

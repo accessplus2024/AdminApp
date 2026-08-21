@@ -14,8 +14,13 @@ import {
 } from './sentinel';
 
 describe('discoveryCandidateLimit', () => {
-  test('processa toda a fila em uma única execução quando solicitado', () => {
-    expect(discoveryCandidateLimit({ allQueued: true, maxCandidates: 1 })).toBe(500);
+  test('limita mesmo quando allQueued pede a fila inteira, pra não estourar o timeout do servidor', () => {
+    // Era 500 (processava tudo de uma vez): uma fila grande (caso real, 91
+    // itens) estourou os 300s de maxDuration do Vercel e travou 82 itens em
+    // 'pending' pra sempre (ver comentário de MAX_DISCOVERY_CANDIDATES em
+    // sentinel.js). Agora usa o mesmo teto do scraper de sites (25) — o resto
+    // fica em queued_remaining pra um próximo clique.
+    expect(discoveryCandidateLimit({ allQueued: true, maxCandidates: 1 })).toBe(25);
   });
 
   test('mantém o limite legado para chamadas parciais', () => {
@@ -194,6 +199,9 @@ describe('Sentinel catalog evidence validation', () => {
   });
 
   test('detects suspicious fields for a holistic coverage pass', () => {
+    // 'level' entra na lista porque a oportunidade não tem nenhum nível
+    // registrado — level é obrigatório desde a correção de 2026-08-21 (level
+    // vazio quebrava o filtro "Nível" da área pública).
     expect(catalogCoverageFields({
       description: 'palavra '.repeat(46),
       language: null,
@@ -201,7 +209,7 @@ describe('Sentinel catalog evidence validation', () => {
       process: 'Registration can be done by students and school staff.',
       status: 'Revisar',
     }, { deadline: '4 de junho de 2026' })).toEqual([
-      'description', 'language', 'keywords', 'process', 'status',
+      'description', 'language', 'level', 'keywords', 'process', 'status',
     ]);
   });
 
@@ -271,7 +279,11 @@ describe('Sentinel catalog evidence validation', () => {
     }, sourceUrl);
 
     expect(result.eligibility).toBe('Estar entre o 5º e 9º ano do Ensino Fundamental');
-    expect(result.level).toEqual([]);
+    // 'level' não veio no parsed (fixture não simula a IA preenchendo esse
+    // campo) — desde 2026-08-21 level nunca fica vazio, cai no padrão
+    // "Ensino Médio" nesse caso (o normalizador não lê eligibility pra
+    // decidir level; isso é responsabilidade do prompt/modelo).
+    expect(result.level).toEqual(['Ensino Médio']);
   });
 
   test('mantém oportunidades qualificadas encerradas sem tratá-las como desqualificadas', () => {

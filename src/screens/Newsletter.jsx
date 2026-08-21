@@ -108,9 +108,36 @@ export default function Newsletter({ opportunities, perms }) {
     && isDeadlineWithinNextMonth(opportunity.prazo)), [opportunities]);
   const opportunityFilter = useOpportunityFilters(publishedOpportunities);
   const selectedIds = useMemo(() => new Set(entries.map((entry) => String(entry.opportunity_id))), [entries]);
+
+  // Trava de 1 ano: uma oportunidade já enviada numa edição PUBLICADA some do
+  // catálogo aprovado (a lista de onde você escolhe o que entra na próxima
+  // edição) por 365 dias a partir do envio — evita reenviar a mesma
+  // oportunidade por engano pouco depois de já ter ido pro ar. Não é uma
+  // coluna nova no banco: usa a data de "última vez publicada"
+  // (fetchLastFeaturedDates, já existia só como aviso) e uma janela rolante —
+  // sem isso, a trava nunca "expiraria" sozinha. Passado 1 ano, a
+  // oportunidade reaparece aqui normalmente, disponível pra ser enviada de
+  // novo (o prazo dela já teria que estar renovado pra passar no filtro de
+  // "dentro do próximo mês" acima, então isso na prática só destrava edições
+  // recorrentes de verdade, não a mesma data velha).
+  const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
+  const lastFeaturedInfo = (id) => featured[id] || null;
+  const isRecentlyFeatured = (id) => {
+    const info = lastFeaturedInfo(id);
+    return !!info?.date && (Date.now() - new Date(info.date).getTime()) < ONE_YEAR_MS;
+  };
+
   const available = useMemo(() => opportunityFilter.rows
-    .filter((opportunity) => !selectedIds.has(String(opportunity._raw?.id || opportunity.id)))
-    .slice(0, 60), [opportunityFilter.rows, selectedIds]);
+    .filter((opportunity) => {
+      const id = opportunity._raw?.id || opportunity.id;
+      return !selectedIds.has(String(id)) && !isRecentlyFeatured(id);
+    })
+    .slice(0, 60), [opportunityFilter.rows, selectedIds, featured]);
+  const recentlyBlocked = useMemo(() => opportunityFilter.rows
+    .filter((opportunity) => {
+      const id = opportunity._raw?.id || opportunity.id;
+      return !selectedIds.has(String(id)) && isRecentlyFeatured(id);
+    }), [opportunityFilter.rows, selectedIds, featured]);
 
   const html = useMemo(() => buildNewsletterHtml(issue, entries), [issue, entries]);
   const patchIssue = (key, value) => setIssue((current) => ({
@@ -260,7 +287,7 @@ export default function Newsletter({ opportunities, perms }) {
 
         <aside className="opportunity-palette">
           <Card>
-            <CardHeader><CardTitle style={{ fontSize: 16 }}>Catálogo aprovado</CardTitle><p className="card-helper">Só oportunidades publicadas aparecem aqui. Adicionar não muda sua exibição no site.</p></CardHeader>
+            <CardHeader><CardTitle style={{ fontSize: 16 }}>Catálogo aprovado</CardTitle><p className="card-helper">Só oportunidades publicadas aparecem aqui. Adicionar não muda sua exibição no site. Enviada numa edição publicada nos últimos 12 meses? Fica oculta aqui pra não ser enviada de novo por engano.</p></CardHeader>
             <CardBody>
               <OpportunityFilters controller={opportunityFilter} total={publishedOpportunities.length} compact placeholder="Buscar no catálogo aprovado…" />
               <div className="opportunity-palette-list">
@@ -279,6 +306,25 @@ export default function Newsletter({ opportunities, perms }) {
                   );
                 })}
               </div>
+              {recentlyBlocked.length > 0 && (
+                <details className="newsletter-code" style={{ marginTop: 12 }}>
+                  <summary>{recentlyBlocked.length} {recentlyBlocked.length === 1 ? 'oportunidade bloqueada' : 'oportunidades bloqueadas'} (enviadas nos últimos 12 meses)</summary>
+                  <div className="opportunity-palette-list">
+                    {recentlyBlocked.map((opportunity) => {
+                      const id = opportunity._raw?.id || opportunity.id;
+                      const last = lastFeaturedInfo(id);
+                      return (
+                        <article key={id} className="opportunity-palette-row">
+                          <div>
+                            <strong>{opportunity.titulo}</strong>
+                            <Badge variant="neutral" dot>Enviada em {formatDate(last?.date)}{last?.title ? ` · ${last.title}` : ''}</Badge>
+                          </div>
+                        </article>
+                      );
+                    })}
+                  </div>
+                </details>
+              )}
             </CardBody>
           </Card>
           <Card className="newsletter-finish-card">

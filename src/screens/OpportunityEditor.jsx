@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
-import { Card, CardHeader, CardTitle, CardBody, Button, Input, Textarea, Select, Field, Switch, Badge, Dialog } from '../components';
+import { Card, CardHeader, CardTitle, CardBody, Button, Input, Textarea, Select, Field, Switch, Checkbox, Badge, Dialog, DatePicker } from '../components';
 import TagSelector from '../components/TagSelector';
 import { Ic } from '../lib/icons';
 import D from '../lib/data';
 import { fetchOpportunityTags } from '../lib/tags';
+import { catalogDeadlineToInputValue, inputValueToCatalogDeadline, ROLLING_DEADLINE_TEXT, isRollingDeadline } from '../lib/deadline';
 
 function Chips({ options, value, onToggle }) {
   return (
@@ -79,6 +80,7 @@ export default function OpportunityEditor({ opp, onCancel, onSave, onDelete, onR
     infoAdicional: get('infoAdicional', ''),
     tags: get('tagsRelacionadas', []) || [],
   });
+  const [prazoContinuo, setPrazoContinuo] = useState(isRollingDeadline(get('prazo', '')));
   const [availableTags, setAvailableTags] = useState([]);
   const [researching, setResearching] = useState(false);
   const [sentinelNotice, setSentinelNotice] = useState(null);
@@ -184,7 +186,25 @@ export default function OpportunityEditor({ opp, onCancel, onSave, onDelete, onR
 
       <EditorSection title="Datas e formato">
         <div className="ap-form-grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-          <Field label="Prazo de inscrição" htmlFor="ed-p"><Input id="ed-p" value={form.prazo}      onChange={(e) => set('prazo', e.target.value)}      placeholder="Ex.: 30 de junho de 2026" /></Field>
+          <Field label="Prazo de inscrição" htmlFor="ed-p">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <DatePicker
+                id="ed-p"
+                value={catalogDeadlineToInputValue(form.prazo)}
+                disabled={prazoContinuo}
+                onChange={(inputValue) => set('prazo', inputValueToCatalogDeadline(inputValue))}
+              />
+              <Checkbox
+                checked={prazoContinuo}
+                onChange={(e) => {
+                  const on = e.target.checked;
+                  setPrazoContinuo(on);
+                  set('prazo', on ? ROLLING_DEADLINE_TEXT : '');
+                }}
+                label="Inscrições contínuas (sem prazo fixo)"
+              />
+            </div>
+          </Field>
           <Field label="Início"             htmlFor="ed-i"><Input id="ed-i" value={form.dataInicio} onChange={(e) => set('dataInicio', e.target.value)} placeholder="Ex.: Provas a partir de set 2026" /></Field>
         </div>
         <div className="ap-form-grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>

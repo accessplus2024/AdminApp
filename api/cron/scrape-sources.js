@@ -301,41 +301,32 @@ export async function coletarCandidatos(supabase, { sites, userId } = {}) {
 // deveCancelar abaixo) — permite cancelar uma pesquisa em andamento (ação
 // 'cancel_research') sem esperar os itens já em fila terminarem todos.
 // -----------------------------------------------------------------------------
+// Tamanho de cada pedaço reivindicado por vez, e quanto tempo (dos 300s de
+// maxDuration do Vercel, ver vercel.json) esta função pode gastar reivindicando
+// pedaços novos antes de parar sozinha e devolver o resto pra fila. Antes,
+// pesquisarCandidatos reivindicava HARD_MAX_CANDIDATES (25) inteiro de uma vez
+// só; se a function morresse no meio (host mata o processo, nenhum
+// catch/finally roda), os itens ainda não processados ficavam presos em
+// 'pending' pra sempre — o mesmo problema que já tinha acontecido do lado do
+// Instagram (ver MAX_DISCOVERY_CANDIDATES em api/sentinel.js, caso real de
+// 2026-08-19). Processar em pedaços de CHUNK_SIZE, parando entre um pedaço e
+// outro conforme o tempo já gasto (em vez de um número fixo chutado), deixa
+// isso seguro pra qualquer tamanho de fila.
+const CHUNK_SIZE = 10;
+const RESEARCH_TIME_BUDGET_MS = 240_000; // reserva ~60s dos 300s pra fechar a resposta com folga
+
 export async function pesquisarCandidatos(supabase, { postIds, maxCandidates, userId, runId = null } = {}) {
-  let fila;
-  if (Array.isArray(postIds) && postIds.length) {
-    const { data, error } = await supabase.from('sentinel_posts').select('*').in('id', postIds).eq('status', 'queued');
-    if (error) throw error;
-    fila = data || [];
-  } else {
-    const limite = Math.max(1, Math.min(Number(maxCandidates) || DEFAULT_MAX_CANDIDATES, HARD_MAX_CANDIDATES));
-    const { data, error } = await supabase.from('sentinel_posts').select('*')
-      .eq('status', 'queued').eq('source_type', 'web')
-      .order('created_at', { ascending: true }).limit(limite);
-    if (error) throw error;
-    fila = data || [];
-  }
-
-  if (fila.length === 0) {
-    return { fase: 'research', processados: 0, resultados: [], detalhes: [] };
-  }
-
-  // Reivindica as linhas (queued -> pending) antes de processar, igual ao fluxo
-  // do Instagram — evita que duas pessoas peçam pesquisa do mesmo item ao mesmo tempo.
-  const ids = fila.map((r) => r.id);
-  const { data: reivindicadas, error: claimError } = await supabase.from('sentinel_posts')
-    .update({ status: 'pending', updated_at: new Date().toISOString(), run_id: runId })
-    .in('id', ids).eq('status', 'queued').select('*');
-  if (claimError) throw claimError;
+  const usandoIdsExplicitos = Array.isArray(postIds) && postIds.length > 0;
+  const restantesExplicitos = usandoIdsExplicitos ? [...postIds] : null;
+  const teto = usandoIdsExplicitos
+    ? postIds.length
+    : Math.max(1, Math.min(Number(maxCandidates) || DEFAULT_MAX_CANDIDATES, HARD_MAX_CANDIDATES));
 
   const allowedTags = await activeOpportunityTagNames(supabase);
 
-  // Cancelamento cooperativo: a cada item que TERMINA, olha se alguém marcou
-  // esse run como 'cancelling' (ação 'cancel_research') antes de começar o
-  // próximo. Não interrompe um item já em andamento (não dá pra abortar um
-  // fetch/chamada de IA em curso no meio do caminho), mas para de pegar
-  // itens novos da fila — os que sobrarem voltam pra 'queued' no final,
-  // prontos pra continuar depois em vez de ficar presos em "pending".
+  // Cancelamento cooperativo: olha se alguém marcou esse run como
+  // 'cancelling' (ação 'cancel_research') — checado tanto entre um pedaço e
+  // outro quanto entre um item e outro dentro do próprio pedaço.
   let cancelado = false;
   async function deveCancelar() {
     if (!runId || cancelado) return cancelado;
@@ -344,33 +335,106 @@ export async function pesquisarCandidatos(supabase, { postIds, maxCandidates, us
     return cancelado;
   }
 
+  const deadline = Date.now() + RESEARCH_TIME_BUDGET_MS;
   const processados = [];
-  const naoIniciados = [];
-  const fonte = reivindicadas || [];
-  let cursor = 0;
-  async function worker() {
-    while (cursor < fonte.length) {
-      if (await deveCancelar()) {
-        // devolve o resto (ainda não pego por nenhum worker) pra fila
-        while (cursor < fonte.length) naoIniciados.push(fonte[cursor++]);
-        return;
-      }
-      const index = cursor++;
-      const row = fonte[index];
-      const resultado = await processPost(
-        supabase,
-        { url: row.source_url, caption: row.caption, ownerUsername: row.owner_username },
-        runId, true, allowedTags,
-      );
-      processados.push({ row, resultado });
-    }
-  }
-  await Promise.all(Array.from({ length: Math.min(3, fonte.length) }, () => worker()));
+  let totalClaimed = 0;
+  let stoppedForTime = false;
+  let naoIniciadosTotal = 0;
 
-  if (naoIniciados.length) {
-    await supabase.from('sentinel_posts')
-      .update({ status: 'queued', updated_at: new Date().toISOString(), run_id: null })
-      .in('id', naoIniciados.map((r) => r.id));
+  while (totalClaimed < teto) {
+    if (await deveCancelar()) break;
+    if (Date.now() >= deadline) { stoppedForTime = true; break; }
+    const take = Math.min(CHUNK_SIZE, teto - totalClaimed);
+
+    let candidatosPedaço;
+    if (usandoIdsExplicitos) {
+      const idsPedaço = restantesExplicitos.splice(0, take);
+      if (!idsPedaço.length) break;
+      const { data, error } = await supabase.from('sentinel_posts').select('*').in('id', idsPedaço).eq('status', 'queued');
+      if (error) throw error;
+      candidatosPedaço = data || [];
+      if (!candidatosPedaço.length) continue; // esses ids já não estão mais 'queued' — segue pro próximo pedaço
+    } else {
+      // SEM filtro de source_type: processa qualquer coisa 'queued', seja de
+      // site (web) ou Instagram. Antes só pegava 'web' — então um clique em
+      // "Processar fila" sem a fonte de Instagram marcada relatava "0 itens
+      // analisados" mesmo com dezenas de posts do Instagram esperando na
+      // fila (processPost já trata os dois tipos igual; a origem só muda
+      // COMO um item chegou na fila, não como ele é processado).
+      const { data, error } = await supabase.from('sentinel_posts').select('*')
+        .eq('status', 'queued')
+        .order('created_at', { ascending: true }).limit(take);
+      if (error) throw error;
+      candidatosPedaço = data || [];
+      if (!candidatosPedaço.length) break; // fila vazia — nada mais a fazer
+    }
+
+    // Reivindica as linhas (queued -> pending) antes de processar, igual ao fluxo
+    // do Instagram — evita que duas pessoas peçam pesquisa do mesmo item ao mesmo tempo.
+    const ids = candidatosPedaço.map((r) => r.id);
+    const { data: reivindicadas, error: claimError } = await supabase.from('sentinel_posts')
+      .update({ status: 'pending', updated_at: new Date().toISOString(), run_id: runId })
+      .in('id', ids).eq('status', 'queued').select('*');
+    if (claimError) throw claimError;
+    const fonte = reivindicadas || [];
+    if (!fonte.length) continue;
+    totalClaimed += fonte.length;
+
+    const naoIniciados = [];
+    let cursor = 0;
+    async function worker() {
+      while (cursor < fonte.length) {
+        if (await deveCancelar()) {
+          while (cursor < fonte.length) naoIniciados.push(fonte[cursor++]);
+          return;
+        }
+        const index = cursor++;
+        const row = fonte[index];
+        // Bug real (2026-08-20): estava manual=true com { url: row.source_url,
+        // ... } — processPost, quando manual=true, usa post.url tanto como
+        // sourceUrl quanto como officialUrl, IGNORANDO POR COMPLETO a caption.
+        // Pra posts de Instagram (ex.: VII Zendal Awards, id 441 — caption
+        // trazia "Details: https://opd.to/4hb28mQ | Deadline: Sept 20"), isso
+        // descartava o link oficial de verdade E o texto da caption (nem
+        // entrava como leadSource, porque leadSource.url virava igual ao da
+        // fonte primária) — a pesquisa via só a própria página do Instagram
+        // (que costuma vir vazia/bloqueada), perdendo link oficial, prazo e
+        // pistas de elegibilidade que estavam bem ali na legenda. manual=false
+        // faz processPost extrair o link da caption primeiro (extractUrl) e
+        // cair pra sourceUrl só se a caption não tiver nenhum link — igual ao
+        // que runDiscovery já faz certo pro fluxo do Instagram em sentinel.js.
+        const resultado = await processPost(
+          supabase,
+          { sourceUrl: row.source_url, caption: row.caption, ownerUsername: row.owner_username },
+          runId, false, allowedTags,
+        );
+        processados.push({ row, resultado });
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(3, fonte.length) }, () => worker()));
+
+    if (naoIniciados.length) {
+      naoIniciadosTotal += naoIniciados.length;
+      await supabase.from('sentinel_posts')
+        .update({ status: 'queued', updated_at: new Date().toISOString(), run_id: null })
+        .in('id', naoIniciados.map((r) => r.id));
+      break; // cancelado — não tenta mais pedaços
+    }
+    if (fonte.length < take && !usandoIdsExplicitos) break; // a fila esgotou nesse pedaço
+  }
+
+  if (processados.length === 0) {
+    // Precisa vir com os mesmos campos numéricos do retorno "normal" abaixo
+    // (qualificados/duplicados/rejeitados/falhados) — o handler em
+    // api/cron/scrape-sources.js soma resultado.qualificados +
+    // resultado.duplicados direto no updateRun de succeeded_count; campo
+    // faltando aqui virava "undefined + undefined" (NaN), que o Supabase
+    // serializa como null e violava a constraint NOT NULL da coluna.
+    return {
+      fase: 'research', processados: 0, resultados: [], detalhes: [],
+      qualificados: 0, duplicados: 0, rejeitados: 0, falhados: 0,
+      cancelado, naoIniciados: naoIniciadosTotal, stoppedForTime,
+    };
   }
 
   const resultados = processados.map((p) => p.resultado);
@@ -396,7 +460,8 @@ export async function pesquisarCandidatos(supabase, { postIds, maxCandidates, us
     rejeitados: resultados.filter((r) => r.status === 'rejected').length,
     falhados,
     cancelado,
-    naoIniciados: naoIniciados.length,
+    stoppedForTime,
+    naoIniciados: naoIniciadosTotal,
     detalhes,
   };
 }
@@ -686,11 +751,24 @@ export default async function handler(req, res) {
         const run = await createRun(supabase, user, 'enrichment', 1, { opportunity_id: opportunityId });
         try {
           const resultado = await enriquecerAutomaticamente(supabase, opportunityId);
+          // Caso real (2026-08-21, Huawei ICT Competition): Reddit respondeu
+          // 429 (rate limit) mas Serper e YouTube acharam 5 links bons, todos
+          // avaliados normalmente — mesmo assim a execução aparecia como
+          // "Parcial"/"1 FALHA" só porque `errors` tinha a entrada do Reddit,
+          // por mais que nada de útil tivesse se perdido de verdade. Uma
+          // fonte falhar (rate limit, timeout) não é o mesmo que a execução
+          // ter falhado: só é "partial"/falha de verdade quando NENHUM
+          // candidato foi avaliado (as fontes que funcionaram também não
+          // acharam nada) — se pelo menos uma fonte trouxe resultado, a
+          // execução é "completed", e o erro da fonte que falhou continua
+          // registrado em metadata.errors só como informação, não como falha
+          // da execução inteira.
+          const semNenhumResultadoUtil = Boolean(resultado.errors) && resultado.avaliados === 0;
           await updateRun(supabase, run.id, {
-            status: resultado.errors ? 'partial' : 'completed',
+            status: semNenhumResultadoUtil ? 'partial' : 'completed',
             processed_count: 1,
-            succeeded_count: resultado.adicionados > 0 ? 1 : 0,
-            failed_count: resultado.errors ? 1 : 0,
+            succeeded_count: semNenhumResultadoUtil ? 0 : 1,
+            failed_count: semNenhumResultadoUtil ? 1 : 0,
             completed_at: new Date().toISOString(),
             metadata: {
               opportunity_id: opportunityId,

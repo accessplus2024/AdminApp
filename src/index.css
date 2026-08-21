@@ -283,6 +283,18 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; }
 .ap-input-group > svg { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); width: 16px; height: 16px; color: var(--neutral-500); }
 .ap-input-group .ap-input { padding-left: 36px; }
 
+/* Date input — o navegador estiliza o próprio ícone de calendário de um jeito
+   inconsistente e apagado por padrão; deixa ele do tamanho certo, clicável em
+   qualquer lugar do campo e com a cor da marca no hover/foco. */
+.ap-input--date { cursor: pointer; letter-spacing: .01em; }
+.ap-input--date::-webkit-calendar-picker-indicator {
+  cursor: pointer; opacity: .65; padding: 4px; border-radius: var(--radius-sm);
+  transition: opacity .12s ease, background-color .12s ease;
+}
+.ap-input--date::-webkit-calendar-picker-indicator:hover { opacity: 1; background: var(--azul-soft); }
+.ap-input--date:disabled { cursor: not-allowed; }
+.ap-input--date:disabled::-webkit-calendar-picker-indicator { opacity: .3; cursor: not-allowed; }
+
 /* Checkbox */
 .ap-check { display: inline-flex; align-items: center; gap: var(--space-2); cursor: pointer; font-family: var(--font-body); font-size: var(--text-base); color: var(--ink); }
 .ap-check input { position: absolute; opacity: 0; width: 0; height: 0; }

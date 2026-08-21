@@ -6,7 +6,7 @@ import {
   fetchQueuedWebCandidates, researchCandidates, WEB_SOURCES,
 } from '../lib/scraperWeb';
 
-const PLATFORM_LABEL = { google: 'Google', youtube: 'YouTube', reddit: 'Reddit' };
+const PLATFORM_LABEL = { google: 'Google', youtube: 'YouTube', reddit: 'Reddit', instagram: 'Instagram' };
 
 const STATUS_PROCESSADO_LABEL = {
   qualified: { label: 'Qualificada', variant: 'success' },
@@ -264,6 +264,21 @@ export default function Web({ perms, onCatalogChanged }) {
                     if (row.status === 'qualified') {
                       const estado = enriquecimentos[row.id];
                       const candidatos = estado?.resultado?.candidatos || [];
+                      // Item 7 (2026-08-21): row.status === 'qualified' só quer dizer
+                      // que o Sentinel criou/achou uma oportunidade — não que ela já
+                      // foi aprovada. Enriquecer antes da aprovação busca link extra
+                      // pra algo que ainda pode ser rejeitado ou mudar de nome/tema
+                      // na revisão humana (ver comentário em api/lib/enrichment.js).
+                      if (row.opportunityStatus !== 'Aprovada') {
+                        return (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-start', maxWidth: 420 }}>
+                            <span>Revisar no Catálogo</span>
+                            <span style={{ color: 'var(--muted-foreground)', fontSize: 12 }}>
+                              Aguardando aprovação{row.opportunityQualificationStatus === 'pending' ? ' (elegibilidade pendente)' : ''} — o enriquecimento libera depois que a oportunidade for aprovada.
+                            </span>
+                          </div>
+                        );
+                      }
                       return (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-start', maxWidth: 420 }}>
                           <span>Revisar no Catálogo</span>

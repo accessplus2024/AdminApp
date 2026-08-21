@@ -20,9 +20,6 @@ import {
 import {
   addInstagramAccount, fetchInstagramAccounts, removeInstagramAccount, setInstagramAccountActive,
 } from '../lib/instagramAccounts';
-import {
-  addRedditSubreddit, fetchRedditSubreddits, removeRedditSubreddit, setRedditSubredditActive,
-} from '../lib/redditSubreddits';
 import { deleteOpportunity, updateOpportunity } from '../lib/opportunities';
 
 const FIELD_LABELS = {
@@ -489,7 +486,7 @@ export default function Sentinel({ perms, opportunities = [], catalogLoading = f
   // isso é um checkbox separado aqui do lado, mas o clique único de "Buscar e
   // analisar" já dispara os dois pipelines juntos quando marcado.
   const [instagramEscolhido, setInstagramEscolhido] = useState(true);
-  // Progresso ao vivo da busca de sites/Reddit — sem isso, "Buscar e
+  // Progresso ao vivo da busca de sites — sem isso, "Buscar e
   // analisar" fica minutos parado no mesmo texto (coletando várias fontes,
   // depois pesquisando um por um com IA) e parece travado/quebrado, mesmo
   // funcionando normalmente. `webStage` marca em qual das duas fases está;
@@ -511,11 +508,6 @@ export default function Sentinel({ perms, opportunities = [], catalogLoading = f
   const [igNovoUsername, setIgNovoUsername] = useState('');
   const [igBusy, setIgBusy] = useState(false);
   const [igError, setIgError] = useState('');
-  const [redditManagerOpen, setRedditManagerOpen] = useState(false);
-  const [redditSubs, setRedditSubs] = useState([]);
-  const [redditNovoNome, setRedditNovoNome] = useState('');
-  const [redditBusy, setRedditBusy] = useState(false);
-  const [redditError, setRedditError] = useState('');
   const activeRunIdRef = useRef(null);
   const loadRequestRef = useRef(0);
   const opportunityFilter = useOpportunityFilters(opportunities, { initialSort: 'prazo' });
@@ -592,35 +584,6 @@ export default function Sentinel({ perms, opportunities = [], catalogLoading = f
     finally { setIgBusy(false); }
   };
 
-  const loadRedditSubs = useCallback(async () => {
-    try { setRedditSubs(await fetchRedditSubreddits()); }
-    catch (error) { setRedditError(error.message); }
-  }, []);
-  useEffect(() => { void loadRedditSubs(); }, [loadRedditSubs]);
-
-  const adicionarSubreddit = async (event) => {
-    event.preventDefault();
-    if (!redditNovoNome.trim()) return;
-    setRedditBusy(true); setRedditError('');
-    try {
-      await addRedditSubreddit(redditNovoNome);
-      setRedditNovoNome('');
-      await loadRedditSubs();
-    } catch (error) { setRedditError(error.message); }
-    finally { setRedditBusy(false); }
-  };
-  const alternarSubreddit = async (sub) => {
-    setRedditBusy(true); setRedditError('');
-    try { await setRedditSubredditActive(sub.name, !sub.active); await loadRedditSubs(); }
-    catch (error) { setRedditError(error.message); }
-    finally { setRedditBusy(false); }
-  };
-  const removerSubreddit = async (sub) => {
-    setRedditBusy(true); setRedditError('');
-    try { await removeRedditSubreddit(sub.name); await loadRedditSubs(); }
-    catch (error) { setRedditError(error.message); }
-    finally { setRedditBusy(false); }
-  };
 
   // A oportunidade já existe no catálogo (status "Revisar") assim que o post
   // vira "Qualificada" — pra nunca se perder, mesmo se ninguém revisar aqui.
@@ -996,7 +959,7 @@ export default function Sentinel({ perms, opportunities = [], catalogLoading = f
 
       {tab === 'discover' && (
         <>
-          <section className="sentinel-hero"><div><span className="sentinel-eyebrow">RADAR DE OPORTUNIDADES</span><h2>Encontre novas oportunidades para revisar.</h2><p>Escolha as fontes abaixo (sites, Reddit e Instagram) e analise toda a fila de uma vez. Cada oportunidade passa por revisão antes de ser publicada.</p></div></section>
+          <section className="sentinel-hero"><div><span className="sentinel-eyebrow">RADAR DE OPORTUNIDADES</span><h2>Encontre novas oportunidades para revisar.</h2><p>Escolha as fontes abaixo (sites e Instagram) e analise toda a fila de uma vez. Cada oportunidade passa por revisão antes de ser publicada.</p></div></section>
           {/* Antes contava só os 250 posts mais recentes (fetchSentinelPosts
               tem limite); com mais de 250 no total, os números batidos ficavam
               menores que o real (ex.: "17 Qualificadas" na tela vs. 23 no
@@ -1021,19 +984,7 @@ export default function Sentinel({ perms, opportunities = [], catalogLoading = f
                   <span>Instagram ({igAccounts.filter((conta) => conta.active).length} {igAccounts.filter((conta) => conta.active).length === 1 ? 'conta ativa' : 'contas ativas'})</span>
                   {Ic(igManagerOpen ? 'chevron-up' : 'chevron-down', 'ico-xs')}
                 </button>
-                <button
-                  type="button"
-                  onClick={() => setRedditManagerOpen((open) => !open)}
-                  aria-expanded={redditManagerOpen}
-                  style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 14, background: 'none', border: '1px solid var(--border)', borderRadius: 999, padding: '4px 12px', cursor: 'pointer' }}
-                >
-                  <span>Reddit ({redditSubs.filter((sub) => sub.active).length} {redditSubs.filter((sub) => sub.active).length === 1 ? 'subreddit ativo' : 'subreddits ativos'})</span>
-                  {Ic(redditManagerOpen ? 'chevron-up' : 'chevron-down', 'ico-xs')}
-                </button>
               </div>
-              <p style={{ color: 'var(--muted-foreground)', fontSize: 13, marginTop: -4, marginBottom: 12 }}>
-                O Reddit já vem marcado acima por padrão sempre que houver algum subreddit ativo (painel "Reddit" acima) — desmarque pra rodar sem ele, ou deixe só ele marcado pra rodar apenas o Reddit. Ele demora mais que os outros (busca por página, sem API paga), então a busca pode levar bem mais tempo quando ele está incluído. Pra saber se ele está funcionando: rode uma busca com ele marcado e abra "Ver detalhe por fonte da última coleta" (abaixo, depois do resultado) — aparece quantos itens o Reddit trouxe, ou o erro, se algum bloqueio (Reddit costuma limitar buscas vindas de servidores) tiver acontecido.
-              </p>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                 <Button variant="outline" onClick={() => {
                   const tudoMarcado = webFontesEscolhidas.size === WEB_SOURCES.length && instagramEscolhido;
@@ -1044,12 +995,12 @@ export default function Sentinel({ perms, opportunities = [], catalogLoading = f
                 </Button>
                 <Button
                   variant="primary"
-                  disabled={!perms.canWrite || webBusy !== null || (webFontesEscolhidas.size === 0 && !instagramEscolhido)}
+                  disabled={!perms.canWrite || webBusy !== null}
                   iconLeft={Ic(webBusy === 'collect' ? 'loader' : 'search', 'ico-sm')}
                   onClick={() => rodarWeb('collect', async () => {
                     // Instagram roda num pipeline totalmente separado (Apify),
                     // então dispara em paralelo com a coleta+pesquisa dos
-                    // sites/Reddit, e o resultado dos dois é combinado num só
+                    // sites, e o resultado dos dois é combinado num só
                     // texto — igual ao antigo botão "Buscar e analisar fila",
                     // só que agora dentro do mesmo clique dos sites.
                     setWebStage('collect'); setWebProgress(null);
@@ -1059,9 +1010,12 @@ export default function Sentinel({ perms, opportunities = [], catalogLoading = f
                     ]);
                     setCollectReport(coleta || null);
                     setWebStage('research');
-                    const pesquisa = webFontesEscolhidas.size > 0
-                      ? await researchCandidates({ maxCandidates: 25, onRunId: setWebRunId })
-                      : null;
+                    // Processa o que já está na fila SEMPRE, mesmo com todas as
+                    // fontes desmarcadas — desmarcar as fontes só evita buscar
+                    // itens NOVOS de novo, não deveria impedir de processar o
+                    // que já ficou acumulado ali (esse era o único jeito de
+                    // esvaziar a fila sem precisar marcar nenhuma fonte).
+                    const pesquisa = await researchCandidates({ maxCandidates: 25, onRunId: setWebRunId });
                     setWebRunId(null); setWebStage(null); setWebProgress(null);
                     return [
                       coleta ? countLabel(coleta?.totalEnfileirado || 0, 'novo item coletado', 'novos itens coletados') : null,
@@ -1081,7 +1035,9 @@ export default function Sentinel({ perms, opportunities = [], catalogLoading = f
                     ? (webStage === 'research'
                         ? (webProgress?.total ? `Analisando… ${webProgress.processed} de ${webProgress.total}` : 'Analisando oportunidades…')
                         : 'Coletando fontes selecionadas…')
-                    : `Buscar e analisar (${webFontesEscolhidas.size + (instagramEscolhido ? 1 : 0)} ${webFontesEscolhidas.size + (instagramEscolhido ? 1 : 0) === 1 ? 'fonte' : 'fontes'})`}
+                    : (webFontesEscolhidas.size + (instagramEscolhido ? 1 : 0)) === 0
+                      ? 'Processar fila (sem coletar fontes novas)'
+                      : `Buscar e analisar (${webFontesEscolhidas.size + (instagramEscolhido ? 1 : 0)} ${webFontesEscolhidas.size + (instagramEscolhido ? 1 : 0) === 1 ? 'fonte' : 'fontes'})`}
                 </Button>
                 {webBusy === 'collect' && webRunId && (
                   <Button variant="outline" onClick={() => cancelarPesquisa()} disabled={cancelandoRunId === webRunId} iconLeft={Ic('x', 'ico-sm')}>
@@ -1092,11 +1048,9 @@ export default function Sentinel({ perms, opportunities = [], catalogLoading = f
               {webError && <p style={{ color: 'var(--danger)', fontSize: 13, marginTop: 12 }}>{webError}</p>}
 
               {collectReport?.fontes?.length > 0 && (
-                // Aberto sozinho quando alguma fonte (ex.: Reddit) veio com erro
-                // ou aviso — é a resposta direta pra "como sei se o Reddit está
-                // funcionando": depois de rodar uma busca com ele marcado, esse
-                // painel mostra a linha do Reddit com quantos itens ele trouxe
-                // (ou o erro, se tiver dado 429/bloqueio).
+                // Aberto sozinho quando alguma fonte veio com erro ou aviso —
+                // esse painel mostra a linha de cada fonte com quantos itens
+                // ela trouxe (ou o erro, se tiver dado algum bloqueio).
                 <details style={{ marginTop: 14 }} open={collectReport.fontes.some((fonte) => fonte.erro || fonte.aviso)}>
                   <summary style={{ cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
                     Ver detalhe por fonte da última coleta
@@ -1155,33 +1109,6 @@ export default function Sentinel({ perms, opportunities = [], catalogLoading = f
                 </div>
               )}
 
-              {redditManagerOpen && (
-                <div className="sentinel-source-details__body" style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--border)' }}>
-                  <p className="card-helper" style={{ marginTop: 0 }}>Subreddits que o Sentinel varre em busca de oportunidades (busca por texto/flair, sem precisar de app aprovado pelo Reddit). Sem nenhum ativo, usa uma lista fixa de reserva no código.</p>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14 }}>
-                    {redditSubs.length === 0 && <p className="card-helper" style={{ margin: 0 }}>Nenhum subreddit cadastrado ainda — usando a lista fixa de reserva.</p>}
-                    {redditSubs.map((sub) => (
-                      <div key={sub.name} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                        <Checkbox checked={sub.active} onChange={() => alternarSubreddit(sub)} disabled={!perms.canWrite || redditBusy} />
-                        <span style={{ flex: 1, fontSize: 14 }}>r/{sub.name}</span>
-                        {!sub.active && <Badge variant="neutral">Desativado</Badge>}
-                        {perms.canWrite && (
-                          <Button variant="ghost" size="icon" aria-label={`Remover r/${sub.name}`} onClick={() => removerSubreddit(sub)} disabled={redditBusy} style={{ color: 'var(--vermelha)' }}>
-                            {Ic('trash-2', 'ico-xs')}
-                          </Button>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                  {perms.canWrite && (
-                    <form onSubmit={adicionarSubreddit} style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                      <Input value={redditNovoNome} onChange={(event) => setRedditNovoNome(event.target.value)} placeholder="nome do subreddit (sem r/)" disabled={redditBusy} style={{ maxWidth: 240 }} />
-                      <Button type="submit" variant="outline" iconLeft={Ic('plus', 'ico-xs')} disabled={!redditNovoNome.trim() || redditBusy}>Adicionar subreddit</Button>
-                    </form>
-                  )}
-                  {redditError && <p style={{ color: 'var(--danger)', fontSize: 13, marginTop: 12 }}>{redditError}</p>}
-                </div>
-              )}
             </CardBody>
           </Card>
 

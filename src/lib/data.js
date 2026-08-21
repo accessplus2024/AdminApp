@@ -22,10 +22,10 @@ const D = {
       'Bolsas de Estudo', 'Competições', 'Competições de Escrita', 'Mentorias',
     ] },
     { key: 'inscricoes', label: 'Disponibilidade', type: 'radio', options: ['Inscrições abertas', 'Inscrições encerradas'] },
-    { key: 'nivel', label: 'Nível', type: 'check', options: ['Fundamental', 'Ensino Médio', 'Gap'] },
+    { key: 'nivel', label: 'Nível', type: 'check', options: ['Fundamental', 'Ensino Médio', 'Gap', 'Faculdade'] },
     { key: 'custo', label: 'Custo', type: 'check', options: ['Bolsa', 'Gratuito', 'Totalmente Financiado'] },
-    { key: 'interesse', label: 'Interesse', type: 'check', options: ['Meio Ambiente', 'Humanas', 'STEM', 'Linguagens', 'Artes'] },
-    { key: 'publicoAlvo', label: 'Público-alvo', type: 'check', options: ['Negros', 'LGBT', 'Baixa Renda', 'Indígenas', 'Deficientes', 'Meninas', 'Escola Pública'] },
+    { key: 'interesse', label: 'Interesse', type: 'check', options: ['Meio Ambiente', 'Humanas', 'STEM', 'Linguagens', 'Artes', 'Empreendedorismo', 'Ativismo', 'Tech', 'Política'] },
+    { key: 'publicoAlvo', label: 'Público-alvo', type: 'check', options: ['Negro/Pardo', 'LGBT', 'Baixa Renda', 'Indígena/Quilombola', 'Deficientes', 'Meninas', 'Escola Pública'] },
   ],
 
   // Oportunidades reais — carregadas do Supabase (App.jsx). Vazio até carregar.

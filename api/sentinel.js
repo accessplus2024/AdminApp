@@ -14,7 +14,19 @@ const MODEL = MODELS.join(' -> ');
 const MODEL_TIMEOUT_MS = Math.max(10_000, Math.min(Number(process.env.SENTINEL_MODEL_TIMEOUT_MS) || 45_000, 120_000));
 const MAX_ADJACENT_PAGES = Math.max(0, Math.min(Number(process.env.SENTINEL_ADJACENT_PAGES) || 8, 12));
 const SOURCE_CHAR_LIMIT = Math.max(18_000, Math.min(Number(process.env.SENTINEL_SOURCE_CHAR_LIMIT) || 48_000, 80_000));
-const MAX_DISCOVERY_CANDIDATES = 500;
+// Era 500: uma execução com Instagram (allQueued=true) reivindicava TODOS os
+// itens da fila de uma vez em 'pending' e processava com concorrência 3. Com
+// itens que levam de dezenas de segundos a ~1-2min cada (várias páginas +
+// chamadas de IA com até MODEL_TIMEOUT_MS), qualquer fila grande (ex.: 91
+// itens, caso real de 2026-08-19, run #76) estoura os 300s de maxDuration do
+// Vercel (ver vercel.json) — a function é matada pelo host no meio do
+// processamento, sem chance de nenhum catch/finally rodar, e os itens que
+// ainda não terminaram ficam presos em 'pending' pra sempre (só saem de lá
+// numa futura execução, pela limpeza de "pending" com mais de 10min).
+// Alinhado ao mesmo teto que o scraper de sites já usa (HARD_MAX_CANDIDATES
+// em api/cron/scrape-sources.js) — o resto continua na fila, contado em
+// "queued_remaining", pronto pra um próximo clique.
+const MAX_DISCOVERY_CANDIDATES = 25;
 const CATALOG_PROMPT_VERSION = 'catalog-review-v11-unified-research';
 const DISCOVERY_PROMPT_VERSION = 'discovery-v6-unified-research';
 // Contas de Instagram: antes fixas aqui, agora vêm da tabela
@@ -32,9 +44,9 @@ const ARRAY_FIELDS = new Set(['areas', 'level', 'keywords', 'audience']);
 const LINE_LIST_FIELDS = new Set(['eligibility', 'applicants']);
 const REQUIRED_TEXT_FIELDS = new Set(['title', 'type', 'status']);
 const CONTROLLED_VALUES = {
-  areas: new Set(['STEM', 'Humanas', 'Meio Ambiente', 'Linguagens', 'Artes']),
-  level: new Set(['Ensino Médio', 'Fundamental', 'Gap Year']),
-  audience: new Set(['Negros', 'LGBT', 'Baixa Renda', 'Indígenas', 'Deficientes', 'Meninas', 'Escola Pública']),
+  areas: new Set(['STEM', 'Humanas', 'Meio Ambiente', 'Linguagens', 'Artes', 'Empreendedorismo', 'Ativismo', 'Tech', 'Política']),
+  level: new Set(['Ensino Médio', 'Fundamental', 'Gap', 'Faculdade']),
+  audience: new Set(['Negro/Pardo', 'LGBT', 'Baixa Renda', 'Indígena/Quilombola', 'Deficientes', 'Meninas', 'Escola Pública']),
   type: new Set(['Programas Acadêmicos', 'Olimpíadas Científicas', 'Competições', 'Competições de Escrita', 'Mentorias', 'Bolsas de Estudo', 'Programas de Intercâmbio', 'MUNs', 'Estágios']),
   status: new Set(['Aprovada', 'Revisar', 'Rascunho', 'Encerrada']),
   qualification_status: new Set(['pending', 'qualified', 'unqualified']),
@@ -51,16 +63,38 @@ const QUALIFICATION_VERDICTS = new Set(['qualified', 'unqualified', 'uncertain']
 // Em vez de depender só de o modelo escolher a frase "ideal", a lista
 // também reconhece esse jeito comum de descrever alcance internacional sem
 // usar a palavra "international" (contagem de países, em vez de nome).
-const BRAZIL_REACH_PATTERN = /\b(?:brasil|brazil|brasileir[oa]s?|brazilian|international students?|internationally|all nationalities|any nationality|all countries|any country|worldwide|global(?:ly)?|from every country|from around the world|(?:other|several|many|various|numerous|\d+|over \d+) (?:other )?countries|hosted? students? from|come from .{0,40}countries|qualquer nacionalidade|todas as nacionalidades|qualquer pais|todos os paises|mundo inteiro|outros paises|varios paises|diversos paises|diferentes paises)\b/i;
+const BRAZIL_REACH_PATTERN = /\b(?:brasil|brazil|brasileir[oa]s?|brazilian|international students?|internationally|all nationalities|any nationality|open to all nationals|all countries|any country|worldwide|global(?:ly)?|from every country|from around the world|(?:from |applicants )?all over the world|every corner of the (?:world|globe)|around the globe|(?:other|several|many|various|numerous|\d+|over \d+) (?:other )?countries|hosted? students? from|come from .{0,40}countries|qualquer nacionalidade|todas as nacionalidades|qualquer pais|todos os paises|mundo inteiro|outros paises|varios paises|diversos paises|diferentes paises)\b/i;
 const BRAZIL_LOCAL_REACH_PATTERN = /\b(?:acre|acrean[oa]s?|alagoas|alagoan[oa]s?|amapa|amapaense?s?|amazonas|amazonense?s?|bahia|baian[oa]s?|ceara|cearense?s?|distrito federal|brasiliense?s?|espirito santo|capixaba?s?|goias|goian[oa]s?|maranhao|maranhense?s?|mato grosso(?: do sul)?|mato-grossense?s?|sul-mato-grossense?s?|minas gerais|mineir[oa]s?|(?:estado do|no|do) para|paraense?s?|paraiba|paraiban[oa]s?|parana|paranaense?s?|pernambuco|pernambucan[oa]s?|piaui|piauiense?s?|rio de janeiro|fluminense?s?|carioca?s?|rio grande do norte|potiguar(?:es)?|rio grande do sul|gauch[oa]s?|rondonia|rondoniense?s?|roraima|roraimense?s?|santa catarina|catarinense?s?|sao paulo|paulista?s?|sergipe|sergipan[oa]s?|tocantins|tocantinense?s?)\b/i;
-const YOUTH_PARTICIPATION_PATTERN = /\b(?:youth|young people|young person|student|students|school|college|university|undergraduate|teen|adolesc|jovens?|juventude|estudantes?|alun[oa]s?|universitari[oa]s?|graduand[oa]s?|ensino|escola|matriculad[oa]s?)\b/i;
+// Inclui também "sem limite de idade"/"todas as idades" — caso real: Jan
+// Michalski Switzerland Residency Program dizia "Applicants of all
+// nationalities can apply" + "There is no age limit. Beginners are welcome
+// to apply.", sem usar nenhuma palavra de "jovem"/"estudante" — mesmo assim
+// isso comprova que jovens brasileiros não são excluídos (não há restrição
+// de idade nenhuma), então deve contar como sinal de público jovem tanto
+// quanto "youth"/"student" contam.
+// Caso real (2026-08-21, Scout Adventures Volunteer Program): "Open to all
+// Nationals... Must be 18 or older... No specific formal qualifications or
+// prior experience are needed" prova alcance + é claramente um programa de
+// entrada (voluntariado, sem exigir carreira/diploma) — exatamente o perfil
+// de aluno em gap year, só que sem usar nenhuma das palavras de "jovem/
+// estudante" já cobertas. "Volunteer"/"no prior experience"/"gap year" viram
+// sinal de público jovem tanto quanto "student"/"youth".
+const YOUTH_PARTICIPATION_PATTERN = /\b(?:youth|young people|young person|student|students|school|college|university|undergraduate|teen|adolesc|jovens?|juventude|estudantes?|alun[oa]s?|universitari[oa]s?|graduand[oa]s?|ensino|escola|matriculad[oa]s?|volunteers?|gap year|no (?:specific formal qualifications|prior experience|previous experience|experience necessary)|no (?:experience|qualifications?) (?:needed|required|necessary)|no age (?:limit|restriction|requirement)|all ages|any age|sem limite de idade|sem restri[cç][aã]o de idade|qualquer idade|todas as idades)\b/i;
 // Caso real: AI Civic Action Accelerator 2026 tinha "Applicant(s) must live
 // in the United States or are US citizens or permanent residents living
 // abroad" — nenhuma das frases antigas ("must be a citizen", "citizens or
 // residents of") batia com esse jeito de escrever (verbo "live in", e
 // "permanent residents" sem "of" logo depois). Adicionadas variações comuns
 // de restrição por residência/cidadania dos EUA (ou de qualquer país).
-const PARTICIPATION_EXCLUSION_PATTERN = /\b(?:only|exclusiv(?:e|ely|amente|os?|as?)|must be (?:a |an )?(?:citizen|resident|national)|must (?:live|reside) in|permanent residents?|citizens? or (?:permanent )?residents?( of)?|citizens? and residents? of|open only to|not eligible|cannot apply|ineligible|somente|apenas|exclusiv[oa]s?|deve ser (?:cidad[aã]o|residente)|n[aã]o (?:pode|podem|eleg[ií]vel|aceita))\b/i;
+// "only"/"exclusiv[oa]s?"/"somente"/"apenas" sozinhos foram removidos daqui
+// pelo mesmo motivo documentado em GEO_EXCLUSION_PHRASE_PATTERN (caso real da
+// Bolsa do Ceará: "Você APENAS precisa estar matriculado..." não é exclusão
+// nenhuma, é só "só precisa fazer isto") — mesmo essa checagem rodando só
+// sobre a citação já validada, essas palavras genéricas continuavam
+// derrubando um veredito "qualified" correto pra "uncertain" nesse caso real
+// (coberto por teste). Mantém só frases que combinam a palavra genérica com
+// um substantivo de cidadania/residência ao lado (bem mais específico).
+const PARTICIPATION_EXCLUSION_PATTERN = /\b(?:only (?:citizens?|residents?|nationals?) (?:of|from)|exclusiv(?:e|ely|amente) (?:for|to|pra|para)\s+(?:citizens?|residents?|nationals?|cidad[aã]os?|residentes?)|must be (?:a |an )?(?:citizen|resident|national)|must (?:live|reside) in|permanent residents?|citizens? or (?:permanent )?residents?( of)?|citizens? and residents? of|open only to|not eligible|cannot apply|ineligible|somente (?:citizens?|residents?|nationals?|cidad[aã]os?|residentes?)|apenas (?:citizens?|residents?|nationals?|cidad[aã]os?|residentes?)|deve ser (?:cidad[aã]o|residente)|n[aã]o (?:pode|podem|eleg[ií]vel|aceita))\b/i;
 const BRAZIL_EXCLUSION_PATTERN = /\b(?:brazil(?:ian)?|brasil(?:eir[oa]s?)?).{0,80}\b(?:not eligible|cannot apply|ineligible|excluded|nao (?:pode|podem|e elegivel|sao elegiveis)|excluid[oa]s?)\b|\b(?:not eligible|cannot apply|ineligible|excluded|nao (?:pode|podem|e elegivel|sao elegiveis)|excluid[oa]s?).{0,80}\b(?:brazil(?:ian)?|brasil(?:eir[oa]s?)?)\b|\b(?:except|excluding|exceto|menos)\s+(?:o\s+)?(?:brazil|brasil)\b/i;
 
 // Caso real: Allan Gray Scholarship ("Country: South Africa / Citizenship
@@ -73,7 +107,20 @@ const BRAZIL_EXCLUSION_PATTERN = /\b(?:brazil(?:ian)?|brasil(?:eir[oa]s?)?).{0,8
 // outras) nunca sobrevivia ao verdict "unqualified" e virava "uncertain"
 // sempre com o mesmo texto genérico. Detecta o rótulo + valor e testa se o
 // valor citado NÃO tem nenhum sinal de alcance Brasil/internacional.
-const SCOPE_FIELD_LABELS = 'country|countries|citizenship requirement|nationality requirement|eligible countr(?:y|ies)|programme regions?|program regions?|target regions?|eligible regions?|eligible nationalit(?:y|ies)|nationality|region of residence|country of residence';
+// "country"/"countries" sozinhos foram removidos daqui — achado num caso
+// real: sites agregadores de oportunidades (ex.: opportunitiescorners.com)
+// quase sempre têm um campo de metadado "Country: Switzerland" na página só
+// pra dizer ONDE o programa acontece (o país-sede), não pra quem PODE se
+// candidatar — e isso rejeitava sistematicamente residências, fóruns e
+// fellowships internacionais só porque a sede física é um único país
+// (Switzerland Residency, Youth Forum on UN Global Goals na Suíça, ERA
+// Winter Fellowship em Cambridge/UK, Global Future Forum em Bali — todos
+// tinham exatamente esse campo "Country: <sede>" e nenhuma restrição real de
+// nacionalidade, mas caíam como "unqualified" mesmo com o próprio modelo já
+// tendo concluído "qualified" com citação de alcance internacional). Os
+// rótulos que sobram aqui já são bem mais específicos sobre ELEGIBILIDADE
+// (quem pode se candidatar), não sobre onde o programa roda.
+const SCOPE_FIELD_LABELS = 'citizenship requirement|nationality requirement|eligible countr(?:y|ies)|programme regions?|program regions?|target regions?|eligible regions?|eligible nationalit(?:y|ies)|nationality|region of residence|country of residence';
 const SCOPE_FIELD_PATTERN = new RegExp(`\\b(?:${SCOPE_FIELD_LABELS})\\s*:\\s*([^.,;:]{2,60})`, 'gi');
 // De propósito SEM "all"/"any"/"open" soltos: "Programme Regions: all
 // sixteen regions of Ghana" usa "all" genericamente (todas as regiões DE UM
@@ -85,6 +132,16 @@ const SCOPE_INCLUSIVE_FALLBACK = /\b(?:worldwide|global(?:ly)?|international(?:l
 // Devolve a citação bruta do rótulo+valor (ex.: "country: south africa") se
 // achar um campo de escopo geográfico cujo valor não indica alcance
 // Brasil/internacional — null se não achar nada assim no texto.
+// Igual a findScopeRestrictionQuote, mas para os sinais estruturais de
+// profissional/consultoria/pós-graduação/região não-BR (ver
+// STRUCTURAL_INELIGIBILITY_PATTERN) em vez de campo de escopo geográfico
+// rotulado. Roda sobre a evidence JÁ CITADA e validada pelo modelo.
+function findStructuralIneligibilityQuote(text) {
+  const t = normalizedText(text);
+  if (BRAZIL_REACH_PATTERN.test(t) || BRAZIL_LOCAL_REACH_PATTERN.test(t)) return null;
+  return STRUCTURAL_INELIGIBILITY_PATTERN.exec(t)?.[0] || null;
+}
+
 function findScopeRestrictionQuote(text) {
   const t = normalizedText(text);
   SCOPE_FIELD_PATTERN.lastIndex = 0;
@@ -107,7 +164,20 @@ function findScopeRestrictionQuote(text) {
 // "somente precisa fazer isto", derrubava o caso real da Bolsa do Ceará).
 // Mantém só frases que praticamente só aparecem em regra de
 // cidadania/residência/passaporte.
-const GEO_EXCLUSION_PHRASE_PATTERN = /\bmust be (?:a |an )?(?:citizen|resident|national)\b|\bmust (?:live|reside) in\b|\bpermanent residents?\b|\bcitizens? or (?:permanent )?residents?( of)?\b|\bcitizens? and residents? of\b|\bopen only to\b|\bpassport issued by\b|\bdeve ser (?:cidad[aã]o|residente)\b/i;
+// Caso real (2026-08-21): Girls Who Invest ("accredited four-year U.S. or
+// U.S.-style institution") exclui pelo tipo/local da INSTITUIÇÃO em que o
+// candidato já está matriculado, não pela nacionalidade dele — a própria
+// fonte até diz "we do not limit or exclude applications according to
+// citizenship status", então nenhuma frase de cidadania acima pega esse caso.
+// Um estudante brasileiro matriculado numa universidade brasileira não
+// atende, mesmo sendo bem-vindo quanto à nacionalidade.
+// Caso real (2026-08-21): AKO UAL Storytelling Research Fellowship exige
+// "Have the right to work in the UK for the duration of the Fellowship" — não
+// é uma frase de cidadania/residência clássica, mas cumpre exatamente a mesma
+// função (só quem já tem autorização legal pra trabalhar no Reino Unido pode
+// participar; um jovem brasileiro sem esse direito não atende, mesmo que a
+// fonte nunca mencione nacionalidade).
+const GEO_EXCLUSION_PHRASE_PATTERN = /\bmust be (?:a |an )?(?:citizen|resident|national)\b|\bmust (?:live|reside) in\b|\bpermanent residents?\b|\bcitizens? or (?:permanent )?residents?( of)?\b|\bcitizens? and residents? of\b|\bopen only to\b|\bpassport issued by\b|\baccredited (?:four-year )?u\.?s\.?(?:-style)? (?:college|university|institution)\b|\benrolled (?:in|at) an? (?:accredited )?(?:u\.?s\.?|american) (?:college|university|institution)\b|\battending an? (?:u\.?s\.?|american) (?:college|university)\b|\bright to work in (?:the )?(?:u\.?k\.?|united kingdom|u\.?s\.?a?\.?|united states|australia|canada)\b|\bdireito de trabalho no reino unido\b|\bdeve ser (?:cidad[aã]o|residente)\b/i;
 
 // Mesma checagem do rótulo estruturado, mas direto no texto bruto de cada
 // fonte (não só na evidence que o modelo devolveu) — cobre dois casos: (1)
@@ -123,6 +193,17 @@ const GEO_EXCLUSION_PHRASE_PATTERN = /\bmust be (?:a |an )?(?:citizen|resident|n
 // da frase que disparou o match).
 function findGeographicExclusionEvidence(sources) {
   for (const source of sources || []) {
+    // Página do mesmo host de um blog/agregador, achada durante o
+    // rastreamento, cujo texto não menciona nada do título desta
+    // oportunidade — quase certo que seja outro post sobre um programa
+    // diferente (ver researchSourceAssessment). Uma regra de exclusão
+    // encontrada aí não pode derrubar o veredito desta oportunidade; casos
+    // reais: opportunitiescorners.com e opportunitydesk.org têm páginas de
+    // "FAQ"/"apply" genéricas ou posts antigos sobre outros programas que
+    // continham restrição de cidadania de OUTRA oportunidade, e isso rejeitava
+    // programas que a própria pesquisa já tinha confirmado como abertos a
+    // todas as nacionalidades.
+    if (source?.trust?.authority === 'unrelated_same_host_page') continue;
     const text = source?.text;
     if (!text) continue;
     const labelQuote = findScopeRestrictionQuote(text);
@@ -139,6 +220,100 @@ function findGeographicExclusionEvidence(sources) {
   }
   return null;
 }
+// Caso real (2026-08-20): "Horizon Fellowship" ("now accepting applications
+// from students, researchers, and professionals" + "Competitive salary of
+// $78,000... $190,000+") e "CIVICUS Global Digital Action Toolkit
+// Consultancy" ("seeks an experienced consultant or consultancy team")
+// terminaram como "uncertain"/Pendente com evidence vazio — o modelo não tem
+// uma frase de exclusão geográfica pra citar (o problema nem é de país), mas
+// a fonte já prova sozinha que isso não é uma oportunidade pra estudante:
+// é uma vaga remunerada pra profissional já formado/com experiência, ou uma
+// contratação de consultoria (RFP/TOR). Nenhum nível do catálogo (nem
+// Faculdade, que aceita graduação já concluída) cobre isso. Mesma lógica de
+// "padrão estrutural é evidência suficiente" já usada pra escopo geográfico:
+// não precisa de uma frase dizendo "not for students" pra reconhecer que uma
+// consultoria com termo de referência não é uma bolsa pra jovens.
+// "early-career journalist"/"jornalista em início de carreira" (caso real,
+// 2026-08-21) é a mesma lógica de "early-career professional", só que o
+// substantivo é uma profissão específica em vez da palavra genérica
+// "professional" — sem isso, o padrão não reconhecia a exclusão.
+const PROFESSIONAL_ENGAGEMENT_PATTERN = /\b(?:consultant|consultancy|request for proposals?|terms of reference|scope of work|individual or firm|call for consultants?|consulting firm|years of (?:professional|relevant) experience|early[- ]career (?:\w+\s+)?(?:professionals?|journalists?|researchers?|scientists?|academics?)|mid[- ]career professionals?|senior[- ]career professionals?|working professionals?|full[- ]time (?:employees?|staff|position)|job (?:vacancy|opening|posting)|we are (?:hiring|looking for a consultant)|consultoria|termos de refer[eê]ncia|chamada para consultor(?:es)?|jornalista.{0,20}in[ií]cio de carreira)\b/i;
+// PhD/mestrado/doutorado são pré-requisito de PÓS-graduação — diferente de
+// "Faculdade" (que aceita graduação em andamento OU já concluída). "graduate
+// student"/"postgraduate" em inglês sempre se refere a pós-graduação, nunca
+// a quem está cursando a graduação (isso seria "undergraduate").
+// Caso real (2026-08-21): Kleinhans Fellowship ("Applicants must have a
+// master's degree in forestry...") e Chulabhorn Graduate Institute
+// Scholarship ("open to pursue a Master's program") passaram batido pela
+// versão anterior deste padrão — ela só cobria "master's degree" (não
+// "master's program") e não cobria "graduate degree"/"graduate program"
+// isolados (só "graduate students?", que exige a palavra "students" logo
+// depois). Adicionado também "graduate institute" (o próprio nome da
+// instituição já indica só pós-graduação, como em "Chulabhorn Graduate
+// Institute").
+const GRADUATE_DEGREE_REQUIRED_PATTERN = /\b(?:graduate students?|postgraduate(?:\s+students?)?|master'?s (?:degree|program(?:me)?)|graduate (?:degree|program(?:me)?|institute)|m\.?a\.?\/m\.?sc\.?|ph\.?d\.?(?:\s+candidates?|\s+students?)?|doctoral (?:candidates?|students?|degree)|doctorate degree|estudantes? de (?:mestrado|doutorado|p[oó]s[- ]gradua[cç][aã]o)|p[oó]s[- ]gradua[cç][aã]o)\b/i;
+// Caso real (2026-08-21): World Bank GovTech AI Bootcamp — elegibilidade é só
+// de agências/instituições governamentais (equipe de "Policy Leader" +
+// "Technical Practitioner" indicados pela agência), nunca de uma pessoa
+// física se candidatando sozinha. É o mesmo princípio do caso "elegibilidade
+// é só de instituições" já coberto no prompt do modelo, mas sem nenhum
+// padrão determinístico de apoio — esse cobre a variante mais comum
+// (agência/instituição governamental). Ampliado (2026-08-21, Enterprise
+// Africa Network Fellowship) pra também cobrir elegibilidade de EMPRESA/
+// negócio registrado (não é uma agência de governo, mas o mesmo princípio:
+// quem se candidata é a entidade — "empresa registrada e operando", "small
+// enterprises that are registered", "years of activity"/"full-time staff"
+// como critério — nunca uma pessoa física/jovem estudante).
+// Caso real (2026-08-21, DivInc Women in Tech Accelerator): "The company must
+// be a U.S.-based, for-profit enterprise" — mesmo princípio de "elegibilidade
+// é da empresa, não da pessoa", mas com uma frase totalmente diferente das já
+// cobertas (não usa "registered"/"registration"). Startup/aceleradora quase
+// sempre usa "the company must be", "U.S.-based startup/enterprise/company"
+// ou "the CEO must" (fala do cargo dentro da empresa, não do candidato).
+const GOVERNMENT_INSTITUTION_ONLY_PATTERN = /\bopen to government agenc(?:y|ies)\b|\bgovernment (?:agenc(?:y|ies)|institutions?) may apply\b|\bonly government (?:agenc(?:y|ies)|institutions?)\b|\bsubmitted on behalf of a government agency\b|\bpolicy leader\b.{0,80}\btechnical practitioner\b|\bagências? governamentais?\b|\binstitui(?:ç|c)(?:ão|ões) governamental(?:is)?\b|\bregistered (?:and operating|business entity)\b|\bformally registered as a business\b|\bregistered business entity\b|\bsmall enterprises? that are registered\b|\bcompany registered in\b|\bempresa registrada e operando\b|\bthe company must be\b|\bu\.?s\.?[- ]based (?:company|enterprise|startup|business)\b|\bfor-profit enterprise\b|\bthe ceo must\b|\bstartups? (?:based|headquartered|located) in\b/i;
+// Caso real: "GIZ DataCipation" ("FREE ONLINE CERTIFICATE COURSES FOR AFRICAN
+// PROFESSIONALS"), "Mastercard Foundation AfOx" ("bolsas... para estudantes
+// africanos") e "Africa Fundraising Incubator" ("equipar organizações
+// africanas") — todas restritas a um continente/região que não inclui o
+// Brasil, mas sem usar nenhuma das frases de "only/must be a citizen" que
+// GEO_EXCLUSION_PHRASE_PATTERN já cobre (o recorte aqui é continental, não de
+// cidadania). "Latin american"/"latino-americano" fica de fora de propósito:
+// o Brasil está na América Latina, então isso NÃO é sinal de exclusão.
+// "AU/African Union Member State" (caso real: Enterprise Africa Network
+// Fellowship) é outra forma comum de dizer "país africano" sem usar o
+// gentílico "african" — precisa de padrão próprio. Mesma lógica pra "Asia-
+// Pacific region" (caso real: APSIG Fellowship — "Applicants must be from
+// the Asia-Pacific region"): o Brasil não faz parte dessa região, mas a
+// frase não usa nenhum gentílico da lista acima ("asian" sozinho não cobre
+// "Asia-Pacific", que inclui Oceania).
+const REGION_DEMONYM_RESTRICTION_PATTERN = /\bfor\s+(?:african|asian|middle eastern|arab|ghanaian|kenyan|nigerian|south african|ugandan|tanzanian|rwandan|ethiopian|senegalese|indian|pakistani|filipino|indonesian|vietnamese)\s+(?:students?|professionals?|youth|nationals?|citizens?|scholars?|innovators?|entrepreneurs?|leaders?|women|girls|founders?|organi[sz]ations?)\b|\b(?:organiza[cç][oõ]es|profissionais|estudantes|jovens)\s+africanas?\b|\b(?:au|african union) member states?\b|\bestados?[- ]membros? da uni[aã]o africana\b|\bfrom the asia[- ]pacific region\b|\basia[- ]pacific region\b|\bregi[aã]o [aá]sia[- ]pac[ií]fico\b/i;
+const STRUCTURAL_INELIGIBILITY_PATTERN = new RegExp(
+  `${PROFESSIONAL_ENGAGEMENT_PATTERN.source}|${GRADUATE_DEGREE_REQUIRED_PATTERN.source}|${REGION_DEMONYM_RESTRICTION_PATTERN.source}|${GOVERNMENT_INSTITUTION_ONLY_PATTERN.source}`,
+  'i',
+);
+
+// Mesma varredura de findGeographicExclusionEvidence, mas para os sinais
+// estruturais acima (profissional/consultoria/pós-graduação/região não-BR).
+// Fica separada (não misturada em STRUCTURAL_INELIGIBILITY_PATTERN dentro da
+// mesma função) só porque cada uma tem sua própria checagem de "a fonte não
+// tem alcance Brasil/internacional" antes de aceitar o match.
+function findStructuralIneligibilityEvidence(sources) {
+  for (const source of sources || []) {
+    if (source?.trust?.authority === 'unrelated_same_host_page') continue;
+    const text = source?.text;
+    if (!text) continue;
+    const norm = normalizedText(text);
+    if (BRAZIL_REACH_PATTERN.test(norm) || BRAZIL_LOCAL_REACH_PATTERN.test(norm)) continue;
+    const match = STRUCTURAL_INELIGIBILITY_PATTERN.exec(norm);
+    if (match) {
+      const start = Math.max(0, match.index - 80);
+      const end = Math.min(norm.length, match.index + match[0].length + 80);
+      return { quote: norm.slice(start, end).trim(), source_url: source.url, trust_rank: Number(source.trust?.trust_rank || 0) };
+    }
+  }
+  return null;
+}
+
 const TAG_EXCLUSIONS = new Set([
   'sentinel', 'remoto', 'online', 'presencial', 'hibrido', 'híbrido', 'ingles', 'inglês', 'portugues', 'português', 'espanhol',
   'gratuito', 'gratis', 'grátis', 'pago', 'bolsa-de-estudo', 'totalmente-financiado', 'ensino-medio', 'ensino-médio',
@@ -154,8 +329,10 @@ const ELIGIBILITY_PROCESS_GUIDANCE = [
   '- Analise eligibility e process em conjunto: mova para process todo conteúdo operacional ou explicativo que estiver em eligibility, sem perder informação e sem duplicá-la.',
   '- Em process, não repita prazo, custo, local ou idioma já registrados nos campos próprios.',
   '- O catálogo é voltado a estudantes brasileiros. Não escreva "Ser de qualquer lugar do mundo" nem equivalentes. Só inclua nacionalidade ou residência quando houver restrição real que afete brasileiros.',
+  '- Caso real (2026-08-21, UNITAR Women\'s Leadership): a fonte dizia "UNITAR invites women and others, aged 18 and above, living in or from Pacific Island countries and territories or Asia to apply" MAS a mesma página também dizia "Applicants from other countries are also welcome" — quando a fonte tiver foco regional declarado E uma frase explícita de que outros países também podem se candidatar, isso NÃO é uma exclusão geográfica real. Não escreva eligibility como se só a região citada pudesse participar; registre as duas partes, por exemplo "Ter 18 anos ou mais (prioridade para candidatos da Ásia e Ilhas do Pacífico, mas outros países também podem se candidatar)". Só trate como exclusão real (sem citar a região) quando a fonte não tiver nenhuma frase equivalente de abertura a outros países.',
   '- Se language já informar "Inglês", não repita em eligibility requisitos genéricos como "Saber inglês". Mantenha apenas exigência linguística adicional, específica e eliminatória, como nota mínima comprovada em teste.',
   '- Exemplo: para Câmara Mirim na Escola, eligibility deve ser apenas "Estar entre o 5º e 9º ano do Ensino Fundamental". O envio do projeto de lei, a participação da escola ou de educadores e as etapas de seleção pertencem a process.',
+  '- Caso real (2026-08-21, University of Miami Stamps Scholarship): a fonte diz "Applicants from all countries, as well as U.S. Citizens, can apply" para uma bolsa de GRADUAÇÃO (bachelor\'s degree). Um eligibility errado seria "Aceita estudantes de todos os países, incluindo brasileiros, e oferece bolsa totalmente financiada para graduação" — isso mistura elegibilidade com cost/description (financiamento não é critério de quem pode participar) e fica vago sobre o nível. O eligibility correto é objetivo e já embute o nível: "Ser estudante de graduação internacional ou cidadão dos EUA". Nunca inclua "bolsa totalmente financiada", "oferece", "gratuito" ou equivalentes em eligibility — isso é cost ou description.',
 ].join('\n');
 
 function serverClient(req) {
@@ -497,7 +674,9 @@ const AGGREGATOR_SEED_HOSTS = new Set([
   'standoutsearch.com', 'snow.day', 'pathspire.net', 'admissionsangle.com', 'reddit.com',
 ]);
 
-function researchSourceAssessment(url, relation = '', { primaryUrl = '', discoveredFrom = null, depth = 0 } = {}) {
+function researchSourceAssessment(url, relation = '', {
+  primaryUrl = '', discoveredFrom = null, depth = 0, titleRelevant = true,
+} = {}) {
   let host = '';
   let primaryHost = '';
   try { host = comparableHost(new URL(url).hostname); } catch { /* leave empty */ }
@@ -508,6 +687,20 @@ function researchSourceAssessment(url, relation = '', { primaryUrl = '', discove
   const sameHost = host && primaryHost && host === primaryHost;
   const seedIsAggregator = primaryHost && AGGREGATOR_SEED_HOSTS.has(primaryHost);
   if (sameHost && depth === 0) return { authority: 'seed_site_unverified', trust_rank: 3, discovered_from: discoveredFrom };
+  // Página do mesmo host, mas encontrada durante o rastreamento (não a fonte
+  // original) e cujo texto NÃO menciona nada do título desta oportunidade: é
+  // quase certo que seja outro post/página do mesmo blog/agregador sobre um
+  // programa diferente (achado real: opportunitiescorners.com e
+  // opportunitydesk.org têm páginas como "/apply-to-google-internships/" ou
+  // "/how-to-apply-for-student-loan-forgiveness/" que nada têm a ver com a
+  // oportunidade sendo pesquisada, mas "apply" no caminho da URL as
+  // classificava como official_rules_or_application, prioridade 5 — mais
+  // confiável que a própria notícia-semente). Isso vale mesmo quando o host
+  // não está na lista fixa AGGREGATOR_SEED_HOSTS, porque qualquer conta do
+  // Instagram pode linkar pra um blog agregador novo que a lista ainda não
+  // conhece — a checagem de relevância pelo título não depende de uma lista
+  // fixa de hosts.
+  if (sameHost && depth > 0 && !titleRelevant) return { authority: 'unrelated_same_host_page', trust_rank: 2, discovered_from: discoveredFrom };
   if (operational && sameHost && !seedIsAggregator) return { authority: 'official_rules_or_application', trust_rank: 5, discovered_from: discoveredFrom };
   // Mesmo host de um agregador conhecido: é só outro post do blog, nunca
   // "oficial" desta oportunidade — trava no mesmo nível de confiança da
@@ -525,6 +718,7 @@ const AUTHORITY_TRUST_RANK = {
   seed_site_unverified: 3,
   linked_application_platform: 3,
   third_party_or_unverified: 2,
+  unrelated_same_host_page: 2,
   social_lead: 1,
 };
 
@@ -696,6 +890,20 @@ export async function fetchResearchSources(url, opportunity = {}) {
   const linkContext = { title: opportunity.title || '', year, signals: plan.flatMap((topic) => topic.signals) };
   const primaryLimit = Math.min(12_000, SOURCE_CHAR_LIMIT);
   const primary = await fetchPageText(url, { maxChars: primaryLimit, discoverLinks: true, linkContext });
+  // Usado só pra marcar páginas do mesmo host achadas durante o rastreamento
+  // (não a fonte original) que claramente não falam desta oportunidade — ver
+  // comentário em researchSourceAssessment. No fluxo inicial (Instagram/manual)
+  // `opportunity.title` ainda não existe (só é definido DEPOIS da pesquisa, pelo
+  // próprio Sentinel) — por isso usa também as palavras do caminho da URL
+  // original (ex.: "/switzerland-residency-program-2027/" -> switzerland,
+  // residency, program) como um substituto razoável do título antes dele
+  // existir. Na re-revisão do catálogo (opportunity.title já existe), soma os
+  // dois conjuntos. Se nenhum dos dois render nenhum token útil (raro), não dá
+  // pra afirmar irrelevância com segurança, então a lista fica vazia e a
+  // checagem sempre passa (mesmo comportamento de antes, sem downgrade).
+  let primaryPathTokens = [];
+  try { primaryPathTokens = researchTitleTokens(new URL(primary.url).pathname); } catch { /* keep empty */ }
+  const titleTokensForRelevance = [...new Set([...researchTitleTokens(opportunity.title || ''), ...primaryPathTokens])];
   const remainingChars = Math.max(0, SOURCE_CHAR_LIMIT - primary.text.length);
   const adjacentLimit = MAX_ADJACENT_PAGES ? Math.max(4_000, Math.floor(remainingChars / MAX_ADJACENT_PAGES)) : 0;
   const sources = [annotateResearchSource(
@@ -756,6 +964,18 @@ export async function fetchResearchSources(url, opportunity = {}) {
       pageFetches += result.page.pageFetches;
       const finalKey = canonicalizeOpportunityUrl(result.page.url);
       if (!sources.some((source) => canonicalizeOpportunityUrl(source.url) === finalKey)) {
+        // Exige TODOS os tokens (não só um) — caso real: uma página de blog
+        // sobre um assunto totalmente diferente ("apply-to-google-internships")
+        // mencionava "Switzerland" de passagem (um widget de "outros posts" no
+        // rodapé, listando um estágio da WIPO na Suíça), mas nunca "residency".
+        // Um único token em comum não prova que a página fala desta
+        // oportunidade especificamente; exigir todos reduz muito esse
+        // falso-positivo, ao custo de, em caso de dúvida, só deixar de
+        // confiar cegamente na página — a avaliação da IA continua vendo o
+        // texto completo dela normalmente.
+        const normalizedPageText = normalizedText(result.page.text);
+        const titleRelevant = titleTokensForRelevance.length === 0
+          || titleTokensForRelevance.every((token) => normalizedPageText.includes(token));
         sources.push(annotateResearchSource({
           url: result.page.url,
           text: result.page.text,
@@ -765,6 +985,7 @@ export async function fetchResearchSources(url, opportunity = {}) {
           primaryUrl: primary.url,
           discoveredFrom: result.link.discoveredFrom || primary.url,
           depth: result.link.depth,
+          titleRelevant,
         }));
       }
       if (result.link.depth < 3) enqueue(result.page.links, result.link.depth + 1, result.page.url);
@@ -921,15 +1142,17 @@ PRAZOS:
 3. Só informe deadline com uma citação que diga explicitamente deadline, applications close/due, registration closes/ends, submit by, register by, inscrições até, prazo ou equivalente.
 4. Não infira datas pelo calendário e não misture edições.
 5. Formate sem zero à esquerda: "4 de setembro de 2026". Se não houver prazo comprovado, use null.
+6. Muitos sites escrevem o prazo sem o ano (ex.: "Application Submission Deadline: September 15") porque a página é reaproveitada todo ciclo. Nesse caso, o dia e o mês SÃO a evidência — não descarte nem deixe vago só por faltar o ano: resolva o ano certo usando outras datas da mesma página (ex.: "Website Opens" mais cedo no mesmo ciclo, um texto tipo "2026 Challenge") ou, na ausência disso, o próximo ciclo dessa data a partir de hoje. NUNCA escreva um valor relativo como "hoje", "amanhã", "em breve" ou equivalente — deadline é sempre uma data completa (dia, mês e ano) ou null.
 
 IDIOMA E TAXONOMIA:
 - Todos os valores, exceto nomes próprios, citações e URLs, devem estar em português brasileiro.
 - cost aceita SOMENTE um destes três valores, nunca um valor em dinheiro nem uma frase descritiva: "Gratuito" (nenhum custo pra nenhum participante), "Bolsa" (existe mensalidade/taxa real, mas há bolsa, ajuda financeira, isenção parcial/total ou desconto por necessidade/mérito disponível), "Totalmente Financiado" (a organização cobre todas as despesas de quem é aceito, sem nenhuma cobrança). O site só existe pra listar oportunidades gratuitas ou com algum caminho de bolsa — nunca escreva "$4.750", "R$500", "US$1.100 por trimestre" ou qualquer valor monetário em cost, mesmo que a fonte também mencione bolsa disponível: nesse caso o valor correto é "Bolsa", sem citar o preço. Se a fonte só mostrar um preço real sem nenhuma bolsa/isenção/desconto disponível, isso é sinal de que a oportunidade não deveria ter sido qualificada — registre isso nos gaps/conflicts em vez de inventar um valor de cost.
 - location deve separar candidatura remota de evento ou final presencial. Se toda a oportunidade for remota, use exatamente "Remoto" e não inclua local.
-- areas: STEM, Humanas, Meio Ambiente, Linguagens ou Artes.
-- level: Ensino Médio, Fundamental ou Gap Year — escolha pelo que a fonte exige, não pelo público genérico ("jovens"/"youth"/"teen"). Ensino Médio = aberto a quem AINDA ESTÁ cursando o ensino médio (secondary/high school student). Fundamental = aberto a quem ainda está no fundamental (younger student, middle school). Gap Year = exige ensino médio JÁ CONCLUÍDO como pré-requisito (ex.: "high school graduate", "completed secondary education", "before starting university/college", programa entre o ensino médio e a faculdade) — mesmo que a idade típica seja parecida com a de um aluno de ensino médio, se a fonte pede o ensino médio já concluído, é Gap Year, não Ensino Médio. Se a fonte exigir ensino superior (university/college) já em andamento ou concluído, isso não é nenhum dos três — sinal de que a oportunidade não deveria ter chegado até aqui; registre isso como gap em vez de forçar um nível.
+- areas é obrigatório: de 1 a 3 valores (nunca mais que 3, mesmo que a oportunidade pareça tocar em vários temas — escolha só os mais centrais), dentre STEM, Humanas, Meio Ambiente, Linguagens, Artes, Empreendedorismo, Ativismo, Tech ou Política.
+- level é obrigatório: nunca use lista vazia. Escolha entre Ensino Médio, Fundamental, Gap ou Faculdade — pelo que a fonte exige, não pelo público genérico ("jovens"/"youth"/"teen"). Ensino Médio = aberto a quem AINDA ESTÁ cursando o ensino médio (secondary/high school student). Fundamental = aberto a quem ainda está no fundamental (younger student, middle school). Gap = exige ensino médio JÁ CONCLUÍDO como pré-requisito (ex.: "high school graduate", "completed secondary education", "before starting university/college", programa entre o ensino médio e a faculdade) — mesmo que a idade típica seja parecida com a de um aluno de ensino médio, se a fonte pede o ensino médio já concluído, é Gap, não Ensino Médio. Faculdade = exige ensino superior (university/college) JÁ EM ANDAMENTO OU CONCLUÍDO como pré-requisito PARA SE CANDIDATAR — não confunda com bolsa que PAGA/FINANCIA um curso de graduação futuro: uma bolsa para "incoming freshman"/"calouro"/candidato que está terminando o ensino médio agora ("high school seniors", "estudantes concluindo o ensino médio") e vai começar a faculdade DEPOIS de aprovado não é Faculdade, é Ensino Médio (ou Gap, se já concluiu o ensino médio e ainda não começou) — o fato de a bolsa financiar quatro anos de graduação não muda quem pode se CANDIDATAR hoje. Caso real (2026-08-21, University of Miami Stamps Scholarship): a fonte oficial diz que o programa é pra "exceptional and academically accomplished high school seniors" que se candidatam via Early Decision I/Early Action — o candidato ainda está no ensino médio no momento da inscrição, então level é Ensino Médio (não Faculdade, mesmo sendo uma "bolsa de graduação"). Se a fonte genuinamente não deixar claro o pré-requisito escolar, use Ensino Médio (público padrão do catálogo), nunca lista vazia.
+- language é obrigatório: sempre um valor, mesmo que nenhuma fonte rotule explicitamente "idioma"/"language". Quando não houver essa informação explícita, infira pelo idioma predominante do texto das próprias fontes pesquisadas (página majoritariamente em inglês, sem nenhuma nota de idioma = "Inglês"; em português = "Português"; em espanhol = "Espanhol"). Considere o idioma exigido ao decidir description/eligibility: se a fonte deixar claro que a candidatura, entrevista ou atividades exigem fluência num idioma que a maioria dos estudantes brasileiros do nível-alvo não teria, registre isso como um critério real em eligibility (não descarte por parecer óbvio).
 - type: Programas Acadêmicos, Olimpíadas Científicas, Competições, Competições de Escrita, Mentorias, Bolsas de Estudo, Programas de Intercâmbio, MUNs ou Estágios.
-- audience aceita SOMENTE estes valores, um ou mais quando comprovados: Negros, LGBT, Baixa Renda, Indígenas, Deficientes, Meninas, Escola Pública. Só inclua um valor quando a fonte exigir, priorizar ou direcionar explicitamente a oportunidade a esse público (cota, elegibilidade restrita, programa dedicado) — não infira a partir de linguagem genérica de diversidade/inclusão sem critério concreto. Não repita nível escolar (isso é level) nem tema (isso é areas). Se for aberta a qualquer estudante, sem recorte, use lista vazia.
+- audience aceita SOMENTE estes valores, um ou mais quando comprovados: Negro/Pardo, LGBT, Baixa Renda, Indígena/Quilombola, Deficientes, Meninas, Escola Pública. Só inclua um valor quando a fonte exigir, priorizar ou direcionar explicitamente a oportunidade a esse público (cota, elegibilidade restrita, programa dedicado) — não infira a partir de linguagem genérica de diversidade/inclusão sem critério concreto. Baixa Renda tem critério concreto próprio: proponha quando a fonte exigir comprovação de necessidade financeira de fato (ex.: "demonstrated financial need", "family income", "FAFSA"/"CSS Profile" como pré-requisito para a bolsa em si — não só pra ajuda de custo geral da faculdade —, "renda familiar", "baixa renda", "vulnerabilidade socioeconômica", bolsa "need-based"). NÃO proponha Baixa Renda quando a bolsa for só "merit-based"/por mérito acadêmico sem exigência de renda, mesmo que aceite alunos de qualquer classe social. Não repita nível escolar (isso é level) nem tema (isso é areas). Se for aberta a qualquer estudante, sem recorte, use lista vazia (aqui, diferente de areas/level, lista vazia é o valor correto quando não há recorte).
 - keywords deve ter de 3 a 8 nomes seletivos do vocabulário ativo, sobre temas, atividades, habilidades, entregáveis ou benefícios. Não use formato, idioma, custo, tipo, nível escolar ou público demográfico como tag.
 ${allowedTags.length ? `- Vocabulário ativo permitido para keywords: ${allowedTags.join(', ')}.` : ''}
 
@@ -949,6 +1172,32 @@ Cada campo preenchido deve ter evidence com citação literal e a URL exata da p
 
 Responda SOMENTE com JSON cru:
 {"title":"Nome oficial","description":"Programa de verão de seis semanas nos Estados Unidos voltado a estudantes interessados em ciência de dados aplicada a problemas sociais. Combina oficinas técnicas com profissionais da área, um projeto em grupo desenvolvido ao longo do programa e mentoria individual até a apresentação final. Hospedagem, alimentação e material didático são cobertos pela organização, e os participantes recebem certificado internacional de conclusão.","link":"URL oficial","deadline":"4 de setembro de 2026","areas":["STEM"],"level":["Ensino Médio"],"audience":[],"location":"Remoto","cost":"Gratuito","language":"Inglês","keywords":["Inovação social","Gestão de projetos","Liderança"],"eligibility":"Estar matriculado","process":"Preencha o formulário. Anexe os documentos solicitados. Envie a candidatura.","applicants":null,"additionals":null,"type":"Programas Acadêmicos","evidence":{"deadline":{"quote":"Applications close on September 4, 2026","source_url":"https://example.org/apply","kind":"application_deadline"}}}`;
+}
+
+// Sinal leve pra inferir idioma quando a fonte não rotula explicitamente
+// ("idioma"/"language"). Conta ocorrência de palavras funcionais comuns de
+// cada idioma no texto bruto das fontes pesquisadas (não depende de nenhuma
+// biblioteca de detecção de idioma) — desempate por português (mais fontes
+// aqui já são em português por padrão) e, na ausência de qualquer sinal,
+// inglês (a maioria das fontes internacionais descobertas pelo Sentinel).
+// Chaves já sem acento/minúsculas (mesmo tratamento de normalizedText),
+// porque o texto testado passa por normalizedText antes de comparar.
+const LANGUAGE_HINT_WORDS = {
+  Português: [' de ', ' que ', ' para ', ' inscricoes ', ' voce ', ' nao ', ' com ', ' sao '],
+  Inglês: [' the ', ' and ', ' application ', ' deadline ', ' students ', ' you ', ' with ', ' are '],
+  Espanhol: [' de ', ' que ', ' para ', ' inscripciones ', ' usted ', ' con ', ' son ', ' los '],
+  Francês: [' le ', ' la ', ' les ', ' vous ', ' avec ', ' candidature ', ' inscription '],
+};
+function inferLanguageFromSources(sources) {
+  const text = ` ${normalizedText((sources || []).map((source) => source.text).join(' ')).slice(0, 20_000)} `;
+  if (!text.trim()) return 'Inglês';
+  let best = 'Inglês';
+  let bestScore = -1;
+  for (const [language, hints] of Object.entries(LANGUAGE_HINT_WORDS)) {
+    const score = hints.reduce((total, hint) => total + (text.split(hint).length - 1), 0);
+    if (score > bestScore) { best = language; bestScore = score; }
+  }
+  return bestScore > 0 ? best : 'Inglês';
 }
 
 export function normalizeDiscoveryResult(parsed, research, fallbackUrl, allowedTags = []) {
@@ -1021,12 +1270,45 @@ export function normalizeDiscoveryResult(parsed, research, fallbackUrl, allowedT
   const relatedLink = hostOf(proposedLink) && research.sources.some((source) => hostOf(source.url) === hostOf(proposedLink));
   result.link = relatedLink ? proposedLink : canonicalizeOpportunityUrl(research.sources[0]?.url || fallbackUrl);
   if (!result.title || !result.link) return { result: null, rejectionReason: 'A fonte não confirmou nome e link oficial suficientes.' };
-  result.description = result.description || 'Descrição ainda não confirmada. Revise antes de publicar.';
-  result.level = result.level || [];
+  // Caso real (2026-08-21, InnovateHERs Scholarship Challenge): o modelo
+  // devolveu todos os outros campos preenchidos com boa evidência (eligibility,
+  // process, cost, areas), mas "description" veio vazio — e antes disso virava
+  // só o placeholder genérico "Descrição ainda não confirmada. Revise antes de
+  // publicar.", publicado desse jeito mesmo (a oportunidade parecia "sem
+  // descrição" pra quem via o catálogo). Em vez de um placeholder inútil,
+  // monta uma descrição mínima a partir do que JÁ foi confirmado (tipo, tema,
+  // elegibilidade, processo) — pior que uma descrição básica automática é não
+  // ter nenhuma informação nenhuma.
+  if (!result.description) {
+    const parts = [];
+    if (result.type) parts.push(`${result.type}${result.areas?.length ? ` de ${result.areas.join('/')}` : ''}.`);
+    if (result.eligibility) parts.push(`Elegibilidade: ${result.eligibility}.`);
+    if (result.process) parts.push(String(result.process).split(/(?<=[.!?])\s+/)[0]);
+    result.description = parts.length
+      ? `${parts.join(' ')} (descrição gerada automaticamente a partir dos outros campos confirmados — revise antes de publicar).`
+      : 'Descrição ainda não confirmada. Revise antes de publicar.';
+    validationNotes.push('description veio vazia do modelo — montada uma versão mínima a partir de type/eligibility/process já confirmados');
+  }
+  // level e areas são obrigatórios (ver instrução em discoveryPrompt) — mas o
+  // modelo às vezes ainda devolve lista vazia ou passa de 3 em areas. Em vez
+  // de deixar a entrada incompleta no catálogo (quebra o filtro "Nível"/
+  // "Interesse" na área pública), aplica os mesmos defaults/limites aqui.
+  if (!result.level || !result.level.length) {
+    result.level = ['Ensino Médio'];
+    validationNotes.push('level veio vazio do modelo — usado o padrão "Ensino Médio" (pré-requisito não ficou claro nas fontes)');
+  }
   result.areas = result.areas || [];
+  if (result.areas.length > 3) {
+    validationNotes.push(`areas veio com ${result.areas.length} valores — mantidos só os 3 primeiros (${result.areas.slice(0, 3).join(', ')})`);
+    result.areas = result.areas.slice(0, 3);
+  }
   result.audience = result.audience || [];
   result.keywords = normalizeKeywordTags(result.keywords || [], allowedTags);
   result.type = result.type || 'Programas Acadêmicos';
+  if (!result.language) {
+    result.language = inferLanguageFromSources(research.sources);
+    validationNotes.push(`language veio vazio do modelo — inferido "${result.language}" pelo idioma predominante das fontes`);
+  }
   const closedEvidence = findExplicitClosedApplications(research.sources, result);
   if ((result.deadline && isPastDate(result.deadline)) || closedEvidence) {
     result.status = 'Encerrada';
@@ -1385,43 +1667,82 @@ async function runDiscovery(supabase, maxCandidates, runId) {
   }).eq('status', 'pending').lt('updated_at', staleBefore);
   if (staleError) throw staleError;
 
-  const { data: queued, error: queueError } = await supabase.from('sentinel_posts')
-    .select('*').eq('status', 'queued').order('score', { ascending: false }).order('created_at', { ascending: true }).limit(maxCandidates);
-  if (queueError) throw queueError;
-  const queuedUrls = (queued || []).map((row) => row.source_url);
-  let claimed = [];
-  if (queuedUrls.length) {
+  // Processa em PEDAÇOS pequenos (CHUNK_SIZE por vez) em vez de reivindicar
+  // maxCandidates inteiro de uma só vez. Antes, um clique com uma fila grande
+  // (allQueued=true) reivindicava tudo em 'pending' e só devolvia o resto pra
+  // fila DEPOIS de terminar tudo — se a function morresse no meio (Vercel
+  // maxDuration, ver vercel.json), esses itens ficavam presos em 'pending'
+  // pra sempre (caso real: run #76, 91 itens, 82 travados, 2026-08-19). Agora
+  // cada pedaço só reivindica o que está prestes a processar de verdade, e o
+  // loop para sozinho — antes do próximo pedaço, não no meio de um fetch — se
+  // o tempo já usado nesta execução estiver chegando perto do limite do
+  // servidor. Qualquer coisa não processada continua 'queued' o tempo todo
+  // (nunca chega a ficar 'pending' presa), pronta pro próximo clique.
+  const CHUNK_SIZE = 10;
+  const DISCOVERY_TIME_BUDGET_MS = 240_000; // reserva ~60s dos 300s de maxDuration pra fechar a resposta com folga
+  const deadline = Date.now() + DISCOVERY_TIME_BUDGET_MS;
+  const allowedTags = await activeOpportunityTagNames(supabase);
+  const allResults = [];
+  let totalClaimed = 0;
+  let stoppedForTime = false;
+  while (totalClaimed < maxCandidates) {
+    if (Date.now() >= deadline) { stoppedForTime = true; break; }
+    const take = Math.min(CHUNK_SIZE, maxCandidates - totalClaimed);
+    const { data: queuedChunk, error: queueError } = await supabase.from('sentinel_posts')
+      .select('*').eq('status', 'queued').order('score', { ascending: false }).order('created_at', { ascending: true }).limit(take);
+    if (queueError) throw queueError;
+    if (!queuedChunk || queuedChunk.length === 0) break; // fila vazia — nada mais a fazer
+
+    const urls = queuedChunk.map((row) => row.source_url);
     const { data: claimedRows, error: claimError } = await supabase.from('sentinel_posts').update({
       status: 'pending', error: null, run_id: runId, updated_at: new Date().toISOString(),
-    }).in('source_url', queuedUrls).eq('status', 'queued').select('*');
+    }).in('source_url', urls).eq('status', 'queued').select('*');
     if (claimError) throw claimError;
-    claimed = claimedRows || [];
+    const claimed = claimedRows || [];
+    if (!claimed.length) break;
+    totalClaimed += claimed.length;
+
+    const candidates = claimed.map((row) => ({
+      sourceUrl: row.source_url, caption: row.caption, ownerUsername: row.owner_username,
+      timestamp: row.posted_at, score: row.score,
+    }));
+    const chunkResults = await withConcurrency(candidates, 3, (post) => processPost(supabase, post, runId, false, allowedTags));
+    allResults.push(...chunkResults);
+
+    // Atualiza a run a cada pedaço (não só no final) — se a function for
+    // morta pelo host entre um pedaço e outro, o histórico da execução ainda
+    // mostra o que já foi processado de verdade, em vez de zero.
+    await updateRun(supabase, runId, {
+      requested_count: totalClaimed,
+      processed_count: allResults.length,
+      succeeded_count: allResults.filter((item) => item.status === 'qualified' || item.status === 'duplicate').length,
+      failed_count: allResults.filter((item) => item.status === 'failed').length,
+    }).catch(() => {});
+
+    if (claimed.length < take) break; // a fila esgotou nesse pedaço, não precisa tentar de novo
   }
-  const candidates = claimed.map((row) => ({
-    sourceUrl: row.source_url, caption: row.caption, ownerUsername: row.owner_username,
-    timestamp: row.posted_at, score: row.score,
-  }));
+
   const { count: queuedRemaining } = await supabase.from('sentinel_posts').select('id', { count: 'exact', head: true }).eq('status', 'queued');
   await updateRun(supabase, runId, {
-    requested_count: candidates.length,
+    requested_count: totalClaimed,
     metadata: {
       scraped: posts.length, new_posts: fresh.length, queued_remaining: queuedRemaining || 0,
       skipped_known_opportunity: skippedKnownOpportunity, skipped_low_score: skippedLowScore, instagram_accounts: accounts.length,
+      stopped_for_time_budget: stoppedForTime,
     },
   });
-  const allowedTags = await activeOpportunityTagNames(supabase);
-  const results = await withConcurrency(candidates, 3, (post) => processPost(supabase, post, runId, false, allowedTags));
-  const metrics = addMetrics(...results.map((item) => item.metrics));
+  const metrics = addMetrics(...allResults.map((item) => item.metrics));
   return {
     response: {
-      scraped: posts.length, newPosts: fresh.length, candidates: candidates.length,
-      qualified: results.filter((item) => item.status === 'qualified').length,
-      duplicates: results.filter((item) => item.status === 'duplicate').length,
-      created: results.filter((item) => item.created).length,
-      rejected: results.filter((item) => item.status === 'rejected').length,
-      failed: results.filter((item) => item.status === 'failed').length,
+      scraped: posts.length, newPosts: fresh.length, candidates: totalClaimed,
+      qualified: allResults.filter((item) => item.status === 'qualified').length,
+      duplicates: allResults.filter((item) => item.status === 'duplicate').length,
+      created: allResults.filter((item) => item.created).length,
+      rejected: allResults.filter((item) => item.status === 'rejected').length,
+      failed: allResults.filter((item) => item.status === 'failed').length,
       queued: queuedRemaining || 0,
       skippedKnownOpportunity, skippedLowScore, instagramAccounts: accounts.length,
+      stoppedForTimeBudget: stoppedForTime,
     },
     metrics,
   };
@@ -1445,15 +1766,17 @@ REGRAS OBRIGATÓRIAS PARA PRAZOS:
 6. deadline deve ser uma data completa, com dia, mês e ano, no formato "D de mês de YYYY", sem zero à esquerda. Mês, estação ou ano isolado — como "agosto" ou "agosto de 2026" — não é deadline válido. Inscrições explicitamente contínuas são a única exceção sem data.
 7. Se o prazo confirmado já passou, inclua também status "Encerrada". Se a fonte disser explicitamente que as inscrições estão fechadas, proponha status "Encerrada" mesmo sem uma data.
 8. Se houver modalidades independentes, avalie todas antes de escolher deadline e status. Enquanto ao menos uma modalidade relevante aceitar inscrições, use o próximo prazo futuro dessa modalidade e não marque a oportunidade inteira como encerrada. Identifique a modalidade no texto. Só use "Encerrada" quando todas as formas relevantes de candidatura estiverem fechadas.
+9. Muitos sites escrevem o prazo sem o ano (ex.: "Application Submission Deadline: September 15") porque a página é reaproveitada todo ciclo. Nesse caso, o dia e o mês SÃO a evidência — não deixe vago só por faltar o ano: resolva o ano certo usando outras datas da mesma página (ex.: "Website Opens" mais cedo no mesmo ciclo) ou, na ausência disso, o próximo ciclo dessa data a partir de hoje. NUNCA proponha um valor relativo como "hoje", "amanhã", "em breve" ou equivalente — deadline é sempre uma data completa (dia, mês e ano) ou null.
 
 IDIOMA, CONDIÇÕES E TAXONOMIA:
 - Todos os valores de updates devem estar em português brasileiro. Traduza custos, critérios, formatos e descrições. Preserve em inglês apenas nomes próprios e URLs.
 - cost aceita SOMENTE "Gratuito", "Bolsa" ou "Totalmente Financiado" — nunca um valor em dinheiro nem uma frase com preço. Se o cost atual estiver como um valor monetário (ex.: "$850 por trimestre... bolsas disponíveis"), proponha a correção para a categoria certa: "Bolsa" se existe mensalidade real mas há bolsa/ajuda financeira/desconto disponível, "Totalmente Financiado" se a organização cobre tudo sem cobrança nenhuma, "Gratuito" se não há custo algum. Nunca proponha um cost com "$", "R$", "US$" ou qualquer número de preço.
 - Em location, diferencie candidatura remota de evento ou final presencial. Uma sede presencial não prova que a candidatura deixou de ser remota; quando ambos forem relevantes, descreva as duas etapas. Se toda a oportunidade for remota, use exatamente "Remoto" e não inclua local.
-- areas aceita somente: STEM, Humanas, Meio Ambiente, Linguagens, Artes. Classifique pelo tema da oportunidade, não pelas modalidades de envio.
-- level aceita somente: Ensino Médio, Fundamental, Gap Year — escolha pelo pré-requisito exigido, não pelo público genérico ("jovens"/"youth"/"teen"). Ensino Médio = exige estar cursando o ensino médio agora. Fundamental = exige estar no fundamental agora. Gap Year = exige ensino médio JÁ CONCLUÍDO (ex.: "high school graduate", "completed secondary education", programa entre o ensino médio e a faculdade) — mesmo com idade parecida à de um aluno de ensino médio, se o pré-requisito é o ensino médio já concluído, corrija para Gap Year, não Ensino Médio. Revise esse campo também em oportunidades já existentes quando a fonte deixar claro qual dos dois é o caso.
+- areas é obrigatório e aceita de 1 a 3 valores (nunca mais que 3): STEM, Humanas, Meio Ambiente, Linguagens, Artes, Empreendedorismo, Ativismo, Tech, Política. Classifique pelo tema da oportunidade, não pelas modalidades de envio. Se a entrada atual tiver mais de 3, proponha a correção mantendo só os mais centrais.
+- level é obrigatório (nunca lista vazia) e aceita somente: Ensino Médio, Fundamental, Gap, Faculdade — escolha pelo pré-requisito exigido, não pelo público genérico ("jovens"/"youth"/"teen"). Ensino Médio = exige estar cursando o ensino médio agora. Fundamental = exige estar no fundamental agora. Gap = exige ensino médio JÁ CONCLUÍDO (ex.: "high school graduate", "completed secondary education", programa entre o ensino médio e a faculdade) — mesmo com idade parecida à de um aluno de ensino médio, se o pré-requisito é o ensino médio já concluído, corrija para Gap, não Ensino Médio. Faculdade = exige ensino superior (university/college) JÁ EM ANDAMENTO OU CONCLUÍDO como pré-requisito PARA SE CANDIDATAR — bolsa que financia um curso de graduação futuro (ex.: "incoming freshman", "high school seniors", candidato que só vai começar a faculdade depois de aprovado) é Ensino Médio ou Gap, nunca Faculdade, mesmo sendo chamada de "bolsa de graduação". Caso real: University of Miami Stamps Scholarship é pra "high school seniors" que se candidatam via Early Decision I/Early Action — level correto é Ensino Médio, não Faculdade. Revise esse campo também em oportunidades já existentes quando a fonte deixar claro qual dos casos é o correto; se estiver vazio, proponha Ensino Médio quando a fonte não deixar claro o pré-requisito.
+- language é obrigatório: se estiver vazio na entrada atual, proponha um valor inferido pelo idioma predominante das fontes pesquisadas (sem nota explícita de idioma, página majoritariamente em inglês = "Inglês", em português = "Português", em espanhol = "Espanhol").
 - type aceita somente: Programas Acadêmicos, Olimpíadas Científicas, Competições, Competições de Escrita, Mentorias, Bolsas de Estudo, Programas de Intercâmbio, MUNs, Estágios.
-- audience aceita SOMENTE estes valores, um ou mais quando comprovados: Negros, LGBT, Baixa Renda, Indígenas, Deficientes, Meninas, Escola Pública. Só proponha um valor quando a fonte exigir, priorizar ou direcionar explicitamente a oportunidade a esse público (cota, elegibilidade restrita, programa dedicado) — não infira a partir de linguagem genérica de diversidade/inclusão sem critério concreto, e remova valores existentes sem essa comprovação. Não repita nível escolar (isso é level) nem tema (isso é areas). Se for aberta a qualquer estudante, sem recorte, proponha lista vazia.
+- audience aceita SOMENTE estes valores, um ou mais quando comprovados: Negro/Pardo, LGBT, Baixa Renda, Indígena/Quilombola, Deficientes, Meninas, Escola Pública. Só proponha um valor quando a fonte exigir, priorizar ou direcionar explicitamente a oportunidade a esse público (cota, elegibilidade restrita, programa dedicado) — não infira a partir de linguagem genérica de diversidade/inclusão sem critério concreto, e remova valores existentes sem essa comprovação. Baixa Renda tem critério concreto próprio: proponha quando a fonte exigir comprovação de necessidade financeira de fato (ex.: "demonstrated financial need", "family income", "FAFSA"/"CSS Profile" como pré-requisito da bolsa em si, "renda familiar", "vulnerabilidade socioeconômica", bolsa "need-based"). NÃO proponha Baixa Renda quando a bolsa for só "merit-based" (por mérito, sem exigência de renda) — caso real: University of Miami Stamps Scholarship é explicitamente "merit-based" sem exigência de necessidade financeira, então audience não deve incluir Baixa Renda mesmo sendo uma bolsa que aceita alunos de qualquer renda. Não repita nível escolar (isso é level) nem tema (isso é areas). Se for aberta a qualquer estudante, sem recorte, proponha lista vazia.
 - Não inclua status, qualification_status nem qualification_reason em updates. A disponibilidade é calculada separadamente a partir dos prazos e a qualificação vem do veredito validado do dossiê; uma nunca substitui a outra.
 - keywords deve ter de 3 a 8 nomes seletivos do vocabulário ativo, sobre temas, atividades, habilidades, entregáveis ou benefícios. Não use formato, idioma, custo, tipo, nível escolar ou público demográfico como tag.
 ${allowedTags.length ? `- Vocabulário ativo permitido para keywords: ${allowedTags.join(', ')}.` : ''}
@@ -1499,6 +1822,10 @@ export function catalogCoverageFields(opportunity = {}, updates = {}, allowedTag
   const descriptionDegenerate = descriptionWords.length >= 10 && descriptionUniqueRatio < 0.4;
   if (missing('description') && (descriptionTooThin || descriptionDegenerate)) fields.push('description');
   if (missing('language') && !String(opportunity.language || '').trim()) fields.push('language');
+  const levelCandidate = missing('level') ? (opportunity.level || []) : updates.level;
+  if (!Array.isArray(levelCandidate) || levelCandidate.length === 0) fields.push('level');
+  const areasCandidate = missing('areas') ? (opportunity.areas || []) : updates.areas;
+  if (Array.isArray(areasCandidate) && areasCandidate.length > 3) fields.push('areas');
   const keywordCandidate = missing('keywords') ? (opportunity.keywords || []) : updates.keywords;
   const normalizedKeywords = normalizeKeywordTags(keywordCandidate, allowedTags);
   if (normalizedKeywords.length < 3 || normalizedKeywords.length > 8
@@ -1531,6 +1858,7 @@ REGRAS:
 - Prefira a edição atual ou futura e identifique claramente quando uma informação pertence a outra edição ou modalidade.
 - Diferencie prazo de inscrição, prazo de entrega posterior, resultado e data do evento.
 - Quando houver modalidades independentes, registre separadamente o prazo e o estado de cada uma; não trate o encerramento de uma modalidade como encerramento de todas.
+- Se a fonte inicial for uma matéria de "lista"/"roundup" que resume DEZENAS de oportunidades diferentes e sem relação entre si (ex.: "75 Scholarships, Grants, Fellowships... with Deadlines in August 2026") em vez de uma página dedicada a UM programa específico, não tente extrair um dossiê misturando pedaços de vários programas diferentes — isso produz um registro incoerente (nome de um programa com prazo/elegibilidade de outro). Registre isso como um gap ("fonte é uma lista com múltiplos programas não relacionados, não uma página de um programa específico") e marque qualification como "uncertain", para que um humano abra a matéria e submeta o link de cada programa individual separadamente.
 - Não converta os fatos em campos do catálogo, não resuma por campo e não descarte fatos só porque parecem redundantes nesta etapa.
 - Cada fato deve ter uma citação literal curta e a URL exata da fonte.
 - Registre todos os fatos materiais encontrados, não apenas datas. Quando houver informação, cubra elegibilidade, formato, custo, idioma, processo, entrega exigida, benefícios e dicas específicas.
@@ -1538,7 +1866,7 @@ REGRAS:
 - Registre lacunas e conflitos explicitamente; não invente respostas.
 - A única regra de qualificação é: existe uma interseção não vazia entre quem pode participar e jovens brasileiros. Basta que ao menos um grupo de jovens brasileiros seja elegível; a oportunidade não precisa atender a todos os jovens do Brasil.
 - Restrições de estado, cidade, escola, rede de ensino, série, idade ou outra característica não desqualificam a oportunidade quando o grupo resultante ainda contém jovens brasileiros. Por exemplo, estudantes de escolas cearenses do 8º ano ao 3º ano do ensino médio qualificam.
-- Use qualification.verdict "qualified" com citação literal que, isoladamente ou em conjunto, comprove a elegibilidade de algum grupo jovem e seu alcance ao Brasil ou a uma localidade brasileira. Se esses fatos estiverem em trechos diferentes, inclua ambos em qualification.evidence. Use "unqualified" quando a fonte mais confiável excluir todos os jovens brasileiros, quando nenhum jovem puder participar, OU quando a fonte mais confiável mostrar que o programa é operado por/para um país ou região específica sem qualquer menção a alcance internacional — por exemplo: nome da organização é um capítulo nacional específico (ex.: "FAWE Ghana", "Cruz Vermelha Portuguesa"), a inscrição exige comparecer pessoalmente a um escritório em outro país, os "parceiros"/instituições de destino são descritos como locais/nacionais, ou o texto trata implicitamente o público como cidadãos de um único país (sem nunca mencionar critério de nacionalidade justamente porque é óbvio pelo contexto que só se aplica a esse país). Nesses casos, mesmo sem uma frase explícita de exclusão, o padrão do programa (escopo nacional único, zero sinal de alcance internacional em nenhuma fonte) já é evidência suficiente de exclusão — não deixe como "uncertain" só porque falta uma frase literal dizendo "apenas cidadãos de X". Use "uncertain" quando faltar prova, houver conflito não resolvido, ou o programa genuinamente não deixar claro se tem escopo nacional ou internacional.
+- Use qualification.verdict "qualified" com citação literal que, isoladamente ou em conjunto, comprove a elegibilidade de algum grupo jovem e seu alcance ao Brasil ou a uma localidade brasileira. Se esses fatos estiverem em trechos diferentes, inclua ambos em qualification.evidence. Use "unqualified" quando a fonte mais confiável excluir todos os jovens brasileiros, quando nenhum jovem puder participar, OU quando a fonte mais confiável mostrar que o programa é operado por/para um país ou região específica sem qualquer menção a alcance internacional — por exemplo: nome da organização é um capítulo nacional específico (ex.: "FAWE Ghana", "Cruz Vermelha Portuguesa"), a inscrição exige comparecer pessoalmente a um escritório em outro país, os "parceiros"/instituições de destino são descritos como locais/nacionais, ou o texto trata implicitamente o público como cidadãos de um único país (sem nunca mencionar critério de nacionalidade justamente porque é óbvio pelo contexto que só se aplica a esse país). Nesses casos, mesmo sem uma frase explícita de exclusão, o padrão do programa (escopo nacional único, zero sinal de alcance internacional em nenhuma fonte) já é evidência suficiente de exclusão — não deixe como "uncertain" só porque falta uma frase literal dizendo "apenas cidadãos de X". Use "uncertain" quando faltar prova, houver conflito não resolvido, ou o programa genuinamente não deixar claro se tem escopo nacional ou internacional. Além da exclusão geográfica, use "unqualified" quando a fonte mostrar que a oportunidade não é, em sua natureza, uma bolsa/programa para estudante — mesmo sem nenhuma restrição de país. Casos reais que passaram batido por não terem frase de exclusão geográfica: (1) vaga remunerada pra profissional já formado ou pesquisador (ex.: "now accepting applications from students, researchers, and professionals" com "Competitive salary of $78,000–$190,000+" — isso é emprego, não bolsa de estudos, mesmo citando "students" de passagem); (2) contratação de consultoria/prestação de serviço (ex.: "seeks an experienced consultant or consultancy team", termo de referência, RFP) — não é uma oportunidade pra jovem se candidatar como estudante; (3) exige mestrado/doutorado/pós-graduação como pré-requisito (ex.: "for students who wish to pursue a Master's or PhD") — mais alto que qualquer nível do catálogo (o nível mais avançado aceito é Faculdade, que cobre graduação em andamento ou já concluída, nunca pós-graduação); (4) elegibilidade é só de instituições/organizações (universidade, ONG, empresa), não de pessoas físicas (ex.: "Open to public or private institution — University, Government body, N.G.O., Foundation, Research Institute, startup"), mesmo que o texto diga "aberto a qualquer país do mundo" — alcance internacional não importa se quem se candidata é a instituição, não o jovem. Nesses quatro casos, marque "unqualified" com a citação literal do trecho que mostra a natureza profissional/pós-graduação/institucional, mesmo sem nenhuma menção a nacionalidade. Trate também como "unqualified" (mesmo padrão do capítulo nacional específico) quando a MISSÃO do programa é sobre um único país que não é o Brasil, mesmo que o nome da organização não deixe isso óbvio — ex.: "iniciativa que visa apoiar jovens inovadores... soluções para a transição verde do Quênia" é tão restrito quanto "só para cidadãos do Quênia", porque o objeto do programa inteiro é um país específico. Da mesma forma, "estar matriculado numa universidade americana/dos EUA" (ex.: "enrolled in or transferring to an accredited four-year U.S. or U.S.-style institution") é uma exclusão geográfica real mesmo quando a fonte disser explicitamente que não há restrição de cidadania (caso real: Girls Who Invest — "we do not limit or exclude applications according to citizenship status" MAS exige matrícula numa instituição dos EUA) — o que importa é onde o candidato já estuda, não a nacionalidade dele; um estudante brasileiro numa universidade brasileira não atende isso mesmo sendo bem-vindo quanto à cidadania. Cuidado para não superaplicar essa lógica geográfica: quando a fonte descreve um foco regional (prioridade ou convite dirigido a uma região) MAS também contém uma frase explícita dizendo que candidatos de outros países/regiões também podem se inscrever, isso NÃO é uma exclusão — marque "qualified", citando as duas partes juntas em evidence. Caso real (2026-08-21, UNITAR Women's Leadership): a fonte dizia "UNITAR invites women and others, aged 18 and above, living in or from Pacific Island countries and territories or Asia to apply", o que sozinho pareceria uma exclusão regional, mas a MESMA página também dizia "Applicants from other countries are also welcome" — combinando as duas citações em evidence, isso qualifica jovens brasileiros normalmente (marque "qualified", não "unqualified" nem "uncertain"). A diferença para os casos de exclusão geográfica acima é que ali a fonte NUNCA menciona abertura a outros países/regiões; aqui ela menciona explicitamente.
 - Escreva qualification.reason em português brasileiro, mesmo quando as fontes estiverem em outro idioma.
 
 PLANO DE PESQUISA:
@@ -1610,10 +1938,12 @@ export function normalizeQualification(rawQualification, sources = []) {
   // (citação já validada contra a fonte), depois no texto bruto de cada
   // fonte (cobre o caso do modelo devolver evidence vazio ou mal citado
   // mesmo com o dado de exclusão presente na página).
-  const scopeQuoteFromEvidence = combined ? findScopeRestrictionQuote(combined) : null;
+  const scopeQuoteFromEvidence = combined
+    ? (findScopeRestrictionQuote(combined) || findStructuralIneligibilityQuote(combined))
+    : null;
   const structuralExclusion = scopeQuoteFromEvidence
     ? { quote: scopeQuoteFromEvidence, source_url: evidence[0]?.source_url, trust_rank: evidence[0]?.trust_rank || 0 }
-    : findGeographicExclusionEvidence(sources);
+    : (findGeographicExclusionEvidence(sources) || findStructuralIneligibilityEvidence(sources));
 
   if (!evidence.length) verdict = structuralExclusion ? 'unqualified' : 'uncertain';
   // Antes exigíamos também POSITIVE_PARTICIPATION_PATTERN (uma palavra tipo
@@ -1628,6 +1958,17 @@ export function normalizeQualification(rawQualification, sources = []) {
   // "only"/"exclusively"/"must be a citizen of" na citação invalida mesmo
   // com reach+youth presentes — cobre o caso "international students, mas só
   // os já matriculados numa universidade americana").
+  // Caso real (2026-08-21, Yale Peace Fellowship): a fonte prova alcance
+  // global com clareza ("Applicants from around the world are eligible to
+  // apply.", "Open to all Nationalities.") mas não menciona nenhuma palavra
+  // de público jovem/estudantil na MESMA citação — o motivo automático virava
+  // o genérico "as citações não comprovam...", que contradiz o fato de haver
+  // citação real provando alcance. Guarda esse caso específico (reach OK, só
+  // falta o sinal de público jovem) pra dar um motivo mais preciso abaixo.
+  const reachConfirmedButYouthUnclear = (BRAZIL_REACH_PATTERN.test(combined) || BRAZIL_LOCAL_REACH_PATTERN.test(combined))
+    && !YOUTH_PARTICIPATION_PATTERN.test(combined)
+    && !BRAZIL_EXCLUSION_PATTERN.test(combined)
+    && !PARTICIPATION_EXCLUSION_PATTERN.test(combined);
   if (verdict === 'qualified' && !((BRAZIL_REACH_PATTERN.test(combined) || BRAZIL_LOCAL_REACH_PATTERN.test(combined))
     && YOUTH_PARTICIPATION_PATTERN.test(combined)
     && !BRAZIL_EXCLUSION_PATTERN.test(combined)
@@ -1645,9 +1986,11 @@ export function normalizeQualification(rawQualification, sources = []) {
   return {
     verdict,
     reason: verdict === 'unqualified' && structuralExclusion && !String(rawQualification?.reason || '').trim()
-      ? `Fonte indica escopo geográfico restrito: "${structuralExclusion.quote}".`
+      ? `Fonte indica critério estrutural que exclui jovens brasileiros: "${structuralExclusion.quote}".`
       : downgraded
-        ? 'As citações coletadas não comprovam que ao menos um grupo de jovens brasileiros pode participar.'
+        ? (reachConfirmedButYouthUnclear
+          ? 'A fonte confirma alcance internacional/global, mas não deixa claro se o público é de jovens/estudantes (sem critério de idade, série ou nível escolar) — precisa de revisão humana para confirmar se atende ao público do catálogo.'
+          : 'As citações coletadas não comprovam que ao menos um grupo de jovens brasileiros pode participar.')
         : String(rawQualification?.reason || (verdict === 'uncertain' ? 'As fontes não comprovam que jovens brasileiros podem participar.' : '')).trim(),
     evidence: finalEvidence,
   };
@@ -2040,7 +2383,16 @@ export function expiredStatusChange(deadline, currentStatus, today = new Date())
   return { before: currentStatus ?? null, after: 'Encerrada' };
 }
 
-const DEADLINE_EVIDENCE_PATTERN = /\b(?:application\s+deadline|deadline\s+(?:for\s+)?(?:applications?|registration|submissions?)|applications?\s+(?:close|closes|due)|registration\s+(?:close|closes|ends|deadline)|submissions?\s+(?:close|closes|due)|submit(?:ted)?\s+by|register\s+by|due\s+(?:by|on)|(?:periodo\s+(?:para|de)\s+)?inscri(?:cao|coes).{0,90}(?:ate|encerra|encerram|termina|terminam|prazo|periodo|de\s+\d{1,4})|prazo.{0,30}inscri(?:cao|coes)|(?:encerramento|termino)\s+das\s+inscricoes|data\s+limite.{0,30}(?:inscri|candidat|projeto)|formularios?.{0,50}(?:submetid|enviad).{0,20}ate)\b/;
+// Caso real (2026-08-21): Yale Peace Fellowship (opportunitiescorners.com)
+// escreve só "Deadline: 9th September 2026", sem "application"/"registration"
+// antes da palavra — nenhuma variante acima batia com um "Deadline:" isolado
+// (rótulo comum em sites agregadores como opportunitiescorners.com e
+// opportunitydesk.org), então sourceDeadlineWindows() não achava NENHUMA
+// janela de texto pra procurar data, mesmo com uma data clara logo depois.
+// "deadline\s*:" e "prazo\s*:" cobrem esse rótulo isolado — ainda seguro
+// porque deadlineLinkedMentions() já exige a data a até 160 caracteres de
+// distância, sem cruzar pontuação de frase.
+const DEADLINE_EVIDENCE_PATTERN = /\b(?:application\s+deadline|deadline\s+(?:for\s+)?(?:applications?|registration|submissions?)|deadline\s*:\s*|prazo\s*:\s*|applications?\s+(?:close|closes|due)|registration\s+(?:close|closes|ends|deadline)|submissions?\s+(?:close|closes|due)|submit(?:ted)?\s+by|register\s+by|due\s+(?:by|on)|(?:periodo\s+(?:para|de)\s+)?inscri(?:cao|coes).{0,90}(?:ate|encerra|encerram|termina|terminam|prazo|periodo|de\s+\d{1,4})|prazo.{0,30}inscri(?:cao|coes)|(?:encerramento|termino)\s+das\s+inscricoes|data\s+limite.{0,30}(?:inscri|candidat|projeto)|formularios?.{0,50}(?:submetid|enviad).{0,20}ate)\b/;
 const ROLLING_EVIDENCE_PATTERN = /\b(?:rolling|open\s+year[- ]round|accepted\s+throughout|inscricoes\s+continuas|fluxo\s+continuo)\b/;
 const REGISTRATION_RANGE_PATTERN = /\binscri(?:cao|coes)\b[^.!?;]{0,35}?(\d{1,2})[\/.\-](\d{1,2})(?:[\/.\-](20\d{2}))?\s*(?:a|ate|ao|[-\u2013\u2014])\s*(\d{1,2})[\/.\-](\d{1,2})(?:[\/.\-](20\d{2}))?/g;
 const REGISTRATION_WRITTEN_RANGE_PATTERN = new RegExp(`\\b(?:periodo\\s+(?:para|de)\\s+)?inscri(?:cao|coes)\\b[^.!?;]{0,140}?\\bde\\s+(\\d{1,2})(?:st|nd|rd|th)?\\s+(?:de\\s+)?(${MONTH_PATTERN})\\s*(?:de|,)?\\s*(20\\d{2})?\\s*(?:a|ate|ao|[-\\u2013\\u2014])\\s*(\\d{1,2})(?:st|nd|rd|th)?\\s+(?:de\\s+)?(${MONTH_PATTERN})\\s*(?:de|,)?\\s*(20\\d{2})?\\b`, 'g');
@@ -2275,10 +2627,46 @@ function findGeneralParticipationEvidence(sources) {
   return null;
 }
 
+// Caso real (2026-08-21, ICYF International Media Camp): a versão anterior
+// aceitava QUALQUER sentença com uma palavra genérica ("student", "university",
+// "professor" etc.) como recuperação de elegibilidade, mesmo sem nenhuma
+// relação com os critérios de elegibilidade de fato — nesse caso, a citação
+// recuperada foi um trecho de depoimento de ex-aluno ("I completed my higher
+// education from University of Engineering and Technology, Peshawar...")
+// simplesmente porque continha a palavra "University", enquanto a lista real
+// de critérios ("Who Can Apply? Be between 18 and 25 years old. Be a citizen
+// of an OIC Member State...") ficou de fora — provavelmente por a lista em
+// bullet ter sido achatada em texto corrido sem pontuação entre itens, o que
+// quebra a divisão por sentença abaixo. Duas mudanças: (1) divide também por
+// quebra de linha, não só por ".!?", pra não juntar itens de lista numa
+// sentença só; (2) tenta primeiro achar a seção rotulada de elegibilidade
+// ("who can apply", "eligibility requirements", "quem pode participar" etc.)
+// e usa a janela de texto logo depois dela — isso é uma âncora muito mais
+// confiável que "contém uma palavra genérica de educação".
+const ELIGIBILITY_SECTION_MARKER_PATTERN = /\bwho can apply\b|\beligibility requirements?\b|\beligibility criteria\b|\bapplicants? must\b|\bquem pode participar\b|\brequisitos? de elegibilidade\b|\bcrit[eé]rios? de elegibilidade\b/i;
+
 export function findEligibilityEvidence(sources, proposedValue = '') {
   const desiredNumbers = String(proposedValue).match(/\b\d{1,2}\b/g) || [];
   for (const source of sources || []) {
-    const sentences = String(source.text || '').split(/(?<=[.!?])\s+/);
+    const rawText = String(source.text || '');
+
+    // Tentativa 1: âncora numa seção claramente rotulada como elegibilidade.
+    const marker = ELIGIBILITY_SECTION_MARKER_PATTERN.exec(rawText);
+    if (marker) {
+      const start = marker.index;
+      const end = Math.min(rawText.length, start + marker[0].length + 600);
+      return {
+        quote: rawText.slice(start, end).trim().slice(0, 800),
+        source_url: source.url,
+        kind: 'eligibility_cleanup',
+      };
+    }
+
+    // Tentativa 2 (fallback): sentenças candidatas por palavra-chave, mas só
+    // aceitas quando de fato citam um dos números buscados (quando existirem
+    // números pra buscar) — sem isso, uma sentença genérica sobre educação
+    // (bio, depoimento) não deveria vencer só por conter "university"/"student".
+    const sentences = rawText.split(/(?<=[.!?])\s+|\n+/);
     const candidates = sentences
       .map((sentence, index) => ({ sentence, index, text: normalizedText(sentence) }))
       .filter(({ text }) => /\b(?:student|estudante|author|autor|professor|educador|eligible|eligibility|matriculad|ensino\s+fundamental|secondary\s+school|college|university)\b/.test(text))
@@ -2286,7 +2674,10 @@ export function findEligibilityEvidence(sources, proposedValue = '') {
         const score = ({ text }) => desiredNumbers.filter((number) => new RegExp('\\b' + number + '\\b').test(text)).length;
         return score(right) - score(left);
       });
-    const index = candidates[0]?.index ?? -1;
+    const withNumberMatch = desiredNumbers.length
+      ? candidates.filter(({ text }) => desiredNumbers.some((number) => new RegExp('\\b' + number + '\\b').test(text)))
+      : candidates;
+    const index = withNumberMatch[0]?.index ?? -1;
     if (index >= 0) {
       return {
         quote: sentences.slice(index, index + 3).join(' ').trim().slice(0, 800),
@@ -2380,7 +2771,13 @@ export function validateFieldEvidence(field, proposedValue, rawEvidence, sources
   if (field === 'process' && !/\b(?:inscri|candidat|application|apply|register|registration|submit|submission|formulario|cadastre|cadastro|pagamento|payment)\b/.test(semanticQuote)) {
     return { valid: false, reason: 'a citaÃ§Ã£o nÃ£o comprova o processo de inscriÃ§Ã£o' };
   }
-  if (field === 'eligibility' && !/\b(?:student|estudante|author|autor|eligible|eligibility|elegivel|matriculad|idade|school|university|college|residencia|resident|aluno|alunos|crianca|criancas|adolescente|adolescentes|fundamental|medio|serie|ano escolar|podem participar|pode participar|cursando|grade|graduate|citizen|cidada|national|nationality|nacionalidade|resides?|living in|morar|reside|born|nascido)\b/.test(semanticQuote)) {
+  // Caso real (2026-08-21, True Blue Fellowship): a citação real era "Youth
+  // ages 16-24 (at the start of the Fellowship period in January)" — um
+  // critério de elegibilidade óbvio (idade), mas nenhuma das palavras da
+  // lista batia com "youth"/"ages" (só tinha "idade" em português e "age"
+  // nem estava na lista) — a citação inteira era descartada, e como o modelo
+  // não propôs outra evidência de elegibilidade, o campo ficava vazio.
+  if (field === 'eligibility' && !/\b(?:student|estudante|author|autor|eligible|eligibility|elegivel|matriculad|idade|ages?|youth|young people|young person|volunteers?|school|university|college|residencia|resident|aluno|alunos|crianca|criancas|adolescente|adolescentes|fundamental|medio|serie|ano escolar|podem participar|pode participar|cursando|grade|graduate|citizen|cidada|national|nationality|nacionalidade|resides?|living in|morar|reside|born|nascido|jovens?|juventude)\b/.test(semanticQuote)) {
     return { valid: false, reason: 'a citaÃ§Ã£o nÃ£o comprova critÃ©rios de elegibilidade' };
   }
   if (field !== 'deadline') return { valid: true, evidence };
