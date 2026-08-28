@@ -99,6 +99,25 @@ export default function App() {
     }
   };
 
+  // Recarrega o catálogo e devolve a versão NOVA desta oportunidade, trocando
+  // também o objeto que a tela de detalhe está mostrando. Necessário porque
+  // syncOpportunities substitui os objetos de D.opportunities por outros: sem
+  // isso, `route.opp` continua sendo o objeto antigo (desconectado da lista) e
+  // a tela segue mostrando os dados de antes.
+  //
+  // Foi o que fazia o enriquecimento parecer que "não funcionava em deploy":
+  // os links iam pro banco, mas a tela nunca buscava a oportunidade de novo,
+  // então "Recursos online" continuava com a lista velha até dar F5 — e se
+  // alguém abrisse o Editor nesse meio-tempo e salvasse, formParaLinha gravava
+  // a lista velha por cima e apagava de verdade os links que tinham entrado.
+  const recarregarOportunidade = async (o) => {
+    const lista = await reloadOpportunities();
+    const id = String(idDoBanco(o));
+    const atualizada = lista.find((x) => String(idDoBanco(x)) === id) || o;
+    setRoute((r) => (r.mode === 'detail' ? { ...r, opp: atualizada } : r));
+    return atualizada;
+  };
+
   // Ao abrir o app, tenta carregar as oportunidades REAIS do Supabase.
   // Se conseguir, substitui os dados de exemplo (mock) que ja estao em D.
   // Se nao estiver configurado (ou der erro), o app segue com o mock.
@@ -157,9 +176,14 @@ export default function App() {
         // nem mostrar erro pro usuário se falhar (chave ausente, rate limit
         // etc.) — só registra no console.
         if (novoUi === 'Publicada') {
-          enrichApprovedOpportunityNow(idDoBanco(o)).catch((e) => {
-            console.error('Enriquecimento automático falhou:', e.message);
-          });
+          // Roda em segundo plano (leva ~15s: 5 buscas + avaliação da IA), mas
+          // agora, quando termina e salvou algo, recarrega a oportunidade — sem
+          // isso os links só apareciam depois de um F5.
+          enrichApprovedOpportunityNow(idDoBanco(o))
+            .then((resultado) => { if (resultado?.adicionados) recarregarOportunidade(o); })
+            .catch((e) => {
+              console.error('Enriquecimento automático falhou:', e.message);
+            });
         }
       } catch (e) { alert('Erro ao mudar status: ' + e.message); return; }
     } else {
@@ -260,7 +284,7 @@ export default function App() {
     screen = <Dashboard onOpen={openOpp} onNew={newOpp} perms={perms} />;
   } else if (active === 'oportunidades') {
     if (route.mode === 'detail')
-      screen = <OpportunityDetail opp={route.opp} onBack={backToList} onEdit={editOpp} onDelete={deleteOpp} onTogglePublish={togglePublish} perms={perms} />;
+      screen = <OpportunityDetail opp={route.opp} onBack={backToList} onEdit={editOpp} onDelete={deleteOpp} onTogglePublish={togglePublish} onRefresh={recarregarOportunidade} perms={perms} />;
     else if (route.mode === 'tags')
       screen = <TagManager onBack={backToList} perms={perms} onCatalogChanged={reloadOpportunities} />;
     else if (route.mode === 'editor')
@@ -269,7 +293,7 @@ export default function App() {
       screen = <Opportunities onOpen={openOpp} onEdit={editOpp} onNew={newOpp} perms={perms} />;
   } else if (active === 'revisao') {
     if (route.mode === 'detail')
-      screen = <OpportunityDetail opp={route.opp} onBack={backToList} onEdit={(o) => editOpp(o, 'revisao')} onDelete={deleteOpp} onTogglePublish={togglePublish} perms={perms} />;
+      screen = <OpportunityDetail opp={route.opp} onBack={backToList} onEdit={(o) => editOpp(o, 'revisao')} onDelete={deleteOpp} onTogglePublish={togglePublish} onRefresh={recarregarOportunidade} perms={perms} />;
     else if (route.mode === 'editor')
       screen = <OpportunityEditor opp={route.opp} onCancel={backToList} onSave={saveOpp} onDelete={deleteOpp} onRunSentinel={analyzeOpportunity} perms={perms} />;
     else

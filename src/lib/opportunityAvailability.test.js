@@ -3,25 +3,42 @@ import { mapOpportunity } from './mapOpportunity';
 import { formParaLinha } from './opportunities';
 import { OPPORTUNITY_AVAILABILITY, opportunityAvailability } from './opportunityAvailability';
 
-const row = (status) => ({
-  id: 1, title: 'Programa', status, type: 'Mentorias', areas: [], level: [], keywords: [], resources: [],
+const row = (extra) => ({
+  id: 1, title: 'Programa', type: 'Mentorias', areas: [], level: [], keywords: [], resources: [], ...extra,
 });
 
 describe('opportunity availability normalization', () => {
-  test('maps only explicit catalog states to open or closed availability', () => {
-    const open = mapOpportunity(row('Aprovada'));
-    const closed = mapOpportunity(row('Encerrada'));
-    const review = mapOpportunity(row('Revisar'));
-
-    expect(opportunityAvailability(open)).toBe(OPPORTUNITY_AVAILABILITY.OPEN);
-    expect(opportunityAvailability(closed)).toBe(OPPORTUNITY_AVAILABILITY.CLOSED);
-    expect(closed.status).toBe(OPPORTUNITY_AVAILABILITY.CLOSED);
-    expect(opportunityAvailability(review)).toBe(OPPORTUNITY_AVAILABILITY.UNKNOWN);
+  test('reads availability from the inscricoes column', () => {
+    expect(opportunityAvailability(mapOpportunity(row({ inscricoes: 'Aberta' }))))
+      .toBe(OPPORTUNITY_AVAILABILITY.OPEN);
+    expect(opportunityAvailability(mapOpportunity(row({ inscricoes: 'Encerrada' }))))
+      .toBe(OPPORTUNITY_AVAILABILITY.CLOSED);
+    expect(opportunityAvailability(mapOpportunity(row({}))))
+      .toBe(OPPORTUNITY_AVAILABILITY.UNKNOWN);
   });
 
-  test('persists the editor availability switch when publishing', () => {
-    expect(formParaLinha({ inscricoesAbertas: true }, 'Publicada').status).toBe('Aprovada');
-    expect(formParaLinha({ inscricoesAbertas: false }, 'Publicada').status).toBe('Encerrada');
-    expect(formParaLinha({ inscricoesAbertas: false }, 'Rascunho').status).toBe('Revisar');
+  test('status and qualification never decide availability', () => {
+    // Publicada com o prazo já vencido: continua no catálogo, mas fechada.
+    expect(opportunityAvailability(mapOpportunity(row({ status: 'Aprovada', inscricoes: 'Encerrada' }))))
+      .toBe(OPPORTUNITY_AVAILABILITY.CLOSED);
+    // Ainda em revisão, mas as inscrições estão de fato abertas.
+    expect(opportunityAvailability(mapOpportunity(row({ status: 'Revisar', inscricoes: 'Aberta' }))))
+      .toBe(OPPORTUNITY_AVAILABILITY.OPEN);
+    // qualification_status é só elegibilidade de brasileiros, não disponibilidade.
+    expect(opportunityAvailability(mapOpportunity(row({ inscricoes: 'Aberta', qualification_status: 'unqualified' }))))
+      .toBe(OPPORTUNITY_AVAILABILITY.OPEN);
+  });
+
+  test('the editor switch writes inscricoes, and publishing alone never closes it', () => {
+    expect(formParaLinha({ inscricoesAbertas: true }, 'Publicada')).toMatchObject({
+      status: 'Aprovada', inscricoes: 'Aberta',
+    });
+    // Desligar o switch fecha as inscrições SEM despublicar a oportunidade.
+    expect(formParaLinha({ inscricoesAbertas: false }, 'Publicada')).toMatchObject({
+      status: 'Aprovada', inscricoes: 'Encerrada',
+    });
+    expect(formParaLinha({ inscricoesAbertas: true }, 'Rascunho')).toMatchObject({
+      status: 'Revisar', inscricoes: 'Aberta',
+    });
   });
 });

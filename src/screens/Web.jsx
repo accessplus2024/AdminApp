@@ -6,7 +6,12 @@ import {
   fetchQueuedWebCandidates, researchCandidates, WEB_SOURCES,
 } from '../lib/scraperWeb';
 
-const PLATFORM_LABEL = { google: 'Google', youtube: 'YouTube', reddit: 'Reddit', instagram: 'Instagram' };
+// 'google' é valor legado (as buscas de enriquecimento hoje devolvem
+// 'website'); 'website' e 'tiktok' faltavam e apareciam crus na tela.
+const PLATFORM_LABEL = {
+  google: 'Google', website: 'Website', youtube: 'YouTube',
+  reddit: 'Reddit', instagram: 'Instagram', tiktok: 'TikTok',
+};
 
 const STATUS_PROCESSADO_LABEL = {
   qualified: { label: 'Qualificada', variant: 'success' },

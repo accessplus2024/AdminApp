@@ -61,6 +61,7 @@ import { passaFiltro, slugTitulo, pontuarItem } from '../lib/scraperFilters.js';
 import { extrairCandidatosDaListagem } from '../lib/listingExtractor.js';
 import { coletarReddit, fetchActiveRedditSubreddits } from '../lib/redditScraper.js';
 import { buscarCandidatosDeEnriquecimento, confirmarEnriquecimento, enriquecerAutomaticamente } from '../lib/enrichment.js';
+import { releaseStalePendingPosts } from '../lib/staleRecovery.js';
 import {
   processPost, activeOpportunityTagNames, createRun, updateRun,
   discoveryTitleSimilarity,
@@ -599,6 +600,14 @@ export default async function handler(req, res) {
       } catch (error) {
         console.error('Limpeza automática de sentinel_posts falhou:', error.message);
       }
+      // Destrava posts presos em "pending" por uma execução anterior que
+      // morreu no meio (ver api/lib/staleRecovery.js) — também best-effort.
+      let travadosLiberadosAutomatico = { requeued: 0, failed: 0 };
+      try {
+        travadosLiberadosAutomatico = await releaseStalePendingPosts(supabase);
+      } catch (error) {
+        console.error('Destravar pendentes travados falhou:', error.message);
+      }
       const resultado = await coletarCandidatos(supabase, {});
       // Pesquisa automática também é "best-effort": uma falha aqui não deve
       // impedir o resto do cron (limpeza/enriquecimento) de rodar.
@@ -616,7 +625,7 @@ export default async function handler(req, res) {
       } catch (error) {
         console.error('Enriquecimento automático falhou:', error.message);
       }
-      res.status(200).json({ ...resultado, pesquisaAutomatica, limpezaAutomatica, enriquecimentoAutomatico });
+      res.status(200).json({ ...resultado, pesquisaAutomatica, limpezaAutomatica, enriquecimentoAutomatico, travadosLiberadosAutomatico });
       return;
     }
     if (req.method === 'POST') {
@@ -629,8 +638,16 @@ export default async function handler(req, res) {
         let limpeza = 0;
         try { limpeza = await limparProcessadosAntigos(supabase); }
         catch (error) { console.error('Limpeza de sentinel_posts falhou:', error.message); }
+        // Destrava posts presos em "pending" por uma execução anterior que
+        // morreu no meio (aba fechada, timeout do servidor, ninguém clicou
+        // em "Cancelar") — ver api/lib/staleRecovery.js. Roda a cada
+        // "Coletar" manual, não só no cron (hoje desligado), pra não
+        // depender de ninguém lembrar de cancelar uma execução esquecida.
+        let travadosLiberados = { requeued: 0, failed: 0 };
+        try { travadosLiberados = await releaseStalePendingPosts(supabase); }
+        catch (error) { console.error('Destravar pendentes travados falhou:', error.message); }
         const resultado = await coletarCandidatos(supabase, { sites: req.body?.sites || null, userId: user.id });
-        res.status(200).json({ ...resultado, limpeza });
+        res.status(200).json({ ...resultado, limpeza, travadosLiberados });
         return;
       }
       if (action === 'research_start') {

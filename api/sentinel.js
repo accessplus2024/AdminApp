@@ -1,6 +1,7 @@
 import { ApifyClient } from 'apify-client';
 import OpenAI from 'openai';
 import { createClient } from '@supabase/supabase-js';
+import { releaseStalePendingPosts } from './lib/staleRecovery.js';
 
 export const config = { maxDuration: 300 };
 
@@ -1661,11 +1662,12 @@ async function runDiscovery(supabase, maxCandidates, runId) {
     })));
     if (error) throw error;
   }
-  const staleBefore = new Date(Date.now() - 10 * 60_000).toISOString();
-  const { error: staleError } = await supabase.from('sentinel_posts').update({
-    status: 'queued', error: 'Execução anterior interrompida; devolvida à fila.', updated_at: new Date().toISOString(),
-  }).eq('status', 'pending').lt('updated_at', staleBefore);
-  if (staleError) throw staleError;
+  // Rede de segurança contra posts presos em "pending" por uma execução
+  // anterior que morreu no meio — agora compartilhada com o fluxo de sites
+  // (ver api/lib/staleRecovery.js) e com limite de tentativas: depois de
+  // travar repetidas vezes, o post vai para "failed" em vez de voltar pra
+  // fila pra sempre sem ninguém perceber.
+  await releaseStalePendingPosts(supabase);
 
   // Processa em PEDAÇOS pequenos (CHUNK_SIZE por vez) em vez de reivindicar
   // maxCandidates inteiro de uma só vez. Antes, um clique com uma fila grande
@@ -3236,6 +3238,13 @@ export default async function handler(req, res) {
     supabase = serverClient(req);
     const user = await authorize(req, supabase);
     const action = req.body?.action;
+    // Best-effort: destrava posts presos em "pending" por uma execução
+    // anterior que morreu (ver api/lib/staleRecovery.js) a cada chamada ao
+    // Sentinel, não só quando alguém clica em "Coletar" — assim uma execução
+    // esquecida (aba fechada, ninguém cancelou) não fica presa até a próxima
+    // vez que alguém rodar o Instagram de propósito. Uma falha aqui nunca
+    // deve impedir a ação que a pessoa realmente pediu.
+    try { await releaseStalePendingPosts(supabase); } catch (error) { console.error('Destravar pendentes travados falhou:', error.message); }
     if (action === 'run') {
       const limit = discoveryCandidateLimit(req.body);
       run = await createRun(supabase, user, 'discovery', 0, { all_queued: req.body?.allQueued === true });

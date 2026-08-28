@@ -45,7 +45,7 @@ function Fact({ icon, label, value }) {
   );
 }
 
-export default function OpportunityDetail({ opp, onBack, onEdit, onDelete, onTogglePublish, perms = {} }) {
+export default function OpportunityDetail({ opp, onBack, onEdit, onDelete, onTogglePublish, onRefresh, perms = {} }) {
   const [confirm, setConfirm] = useState(false);
   const [comentarios, setComentarios] = useState(() => (opp && opp.comentarios) || []);
   const [delId, setDelId] = useState(null);
@@ -81,6 +81,11 @@ export default function OpportunityDetail({ opp, onBack, onEdit, onDelete, onTog
     setEnriching(true); setEnrichNotice(null);
     try {
       const resultado = await enrichApprovedOpportunityNow(idDoBanco(opp));
+      // Busca a oportunidade de novo antes de avisar: os links foram salvos no
+      // banco, mas o `opp` desta tela é o objeto carregado quando o app abriu —
+      // sem recarregar, a mensagem dizia "2 links adicionados" e a seção
+      // "Recursos online" continuava igual, parecendo que nada tinha entrado.
+      if (resultado.adicionados > 0 && onRefresh) await onRefresh(opp);
       setEnrichNotice({
         type: 'success',
         text: resultado.adicionados > 0
@@ -130,9 +135,6 @@ export default function OpportunityDetail({ opp, onBack, onEdit, onDelete, onTog
             {opp.destaque && <span style={{ marginTop: 4 }}>{Ic('star', 'ico-star')}</span>}
             <div style={{ flex: 1 }}>
               <h1 style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 28, letterSpacing: '-0.02em', lineHeight: 1.1 }}>{opp.titulo}</h1>
-              <div style={{ fontSize: 14, color: 'var(--muted-foreground)', marginTop: 6, display: 'flex', alignItems: 'center', gap: 7 }}>
-                {Ic('building-2', 'ico-sm')} {opp.org}
-              </div>
               {opp.link && (
                 <a href={opp.link} target="_blank" rel="noopener noreferrer"
                   style={{ marginTop: 8, display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13.5, fontWeight: 600, color: 'var(--azul)' }}>
@@ -308,12 +310,10 @@ export default function OpportunityDetail({ opp, onBack, onEdit, onDelete, onTog
             <CardHeader><CardTitle style={{ fontSize: 15 }}>Resumo</CardTitle></CardHeader>
             <CardBody style={{ display: 'flex', flexDirection: 'column', gap: 14, paddingTop: 10 }}>
               <Fact icon="calendar"    label="Prazo de inscrição" value={opp.prazo} />
-              <Fact icon="play"        label="Início"             value={opp.dataInicio} />
               <Fact icon="bar-chart-3" label="Nível"              value={opp.nivel.join(' · ')} />
               <Fact icon="users"       label="Público-alvo"       value={(opp.publicoAlvo || []).join(' · ')} />
               <Fact icon="wallet"      label="Custo"              value={opp.custo} />
-              <Fact icon="monitor"     label="Formato"            value={opp.formato} />
-              {opp.formato !== 'Remoto' && opp.local && <Fact icon="map-pin" label="Local" value={opp.local} />}
+              {opp.local && <Fact icon="map-pin" label="Local" value={opp.local} />}
               <Fact icon="target"      label="Área de atuação"    value={opp.areaAtuacao} />
             </CardBody>
           </Card>

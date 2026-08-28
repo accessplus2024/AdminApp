@@ -8,7 +8,7 @@ import { mapOpportunities, mapOpportunity } from './mapOpportunity';
 const OPPORTUNITY_SELECT = [
   'id', 'title', 'description', 'link', 'deadline', 'areas', 'level', 'location',
   'audience', 'cost', 'language', 'keywords', 'eligibility', 'process', 'applicants',
-  'additionals', 'resources', 'status', 'review', 'created_at', 'type',
+  'additionals', 'resources', 'status', 'inscricoes', 'review', 'created_at', 'type',
   'sentinel_discovery_key', 'qualification_status', 'qualification_reason',
 ].join(',');
 
@@ -31,18 +31,18 @@ export async function fetchOpportunities({ throwOnError = false } = {}) {
 // ---------------------------------------------------------------------------
 const splitCommas = (s) => String(s || '').split(',').map((x) => x.trim()).filter(Boolean);
 
-export function serializeOpportunityLocation(form = {}) {
-  const format = String(form.formato || '').trim();
-  const place = String(form.local || '').trim();
-  if (/^(?:remoto|online)$/i.test(format)) return 'Remoto';
-  if (!format) return place || null;
-  return place ? [format, place].join(' — ') : format;
+// status da UI ('Publicada'/'Rascunho'/'Aprovada'/'Em revisão') -> status do banco.
+// Só diz se um humano aprovou a oportunidade. Nada a ver com disponibilidade:
+// quem responde "dá pra se inscrever?" é a coluna `inscricoes`.
+function statusParaBanco(ui) {
+  if (ui === 'Publicada' || ui === 'Aprovada') return 'Aprovada';
+  return 'Revisar';   // 'Rascunho' / 'Em revisão' / qualquer outro
 }
 
-// status da UI ('Publicada'/'Rascunho'/'Aprovada'/'Em revisão') -> status do banco.
-function statusParaBanco(ui, inscricoesAbertas) {
-  if (ui === 'Publicada' || ui === 'Aprovada') return inscricoesAbertas === false ? 'Encerrada' : 'Aprovada';
-  return 'Revisar';   // 'Rascunho' / 'Em revisão' / qualquer outro
+// Switch "Inscrições abertas" do editor -> coluna `inscricoes`.
+// Ligado = 'Aberta' (dá pra se inscrever), desligado = 'Encerrada' (prazo passou).
+function inscricoesParaBanco(inscricoesAbertas) {
+  return inscricoesAbertas === false ? 'Encerrada' : 'Aberta';
 }
 
 // Monta a linha do banco a partir do formulario do editor. `existente` = o _raw
@@ -58,7 +58,7 @@ export function formParaLinha(form, uiStatus, existente = null) {
     audience: form.publicoAlvo || [],
     areas: form.interesse || [],
     cost: form.custo || null,
-    location: serializeOpportunityLocation(form),
+    location: form.local || null,
     deadline: form.prazo || null,
     // colunas de TEXTO no banco (o mapper divide em lista na leitura):
     eligibility: form.elegibilidade || '',
@@ -75,7 +75,8 @@ export function formParaLinha(form, uiStatus, existente = null) {
           .map((r) => ({ platform: r.plataforma || '', label: r.titulo || '', url: r.meta || '' }))
           .filter((r) => r.url || r.label)
       : (ex.resources || []),
-    status: statusParaBanco(uiStatus, form.inscricoesAbertas),
+    status: statusParaBanco(uiStatus),
+    inscricoes: inscricoesParaBanco(form.inscricoesAbertas),
   };
 }
 

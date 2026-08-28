@@ -32,7 +32,7 @@ export function filterAndSortOpportunities(opportunities, query, filters, sort) 
   const q = text(query).trim();
   const rows = (opportunities || []).filter((opportunity) => {
     const searchable = [
-      opportunity.titulo, opportunity.org, opportunity.descricao, opportunity.tipo,
+      opportunity.titulo, opportunity.descricao, opportunity.tipo,
       opportunity.custo, opportunity.prazo, ...(opportunity.tagsRelacionadas || []),
     ].map(text).join(' ');
     if (q && !searchable.includes(q)) return false;

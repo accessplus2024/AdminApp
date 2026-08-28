@@ -65,10 +65,10 @@ export default function OpportunityEditor({ opp, onCancel, onSave, onDelete, onR
   const unqualified = opp?.qualificacao === 'unqualified';
   const get = (k, d) => (opp && opp[k] != null ? opp[k] : d);
   const [form, setForm] = useState({
-    titulo: get('titulo', ''), org: get('org', ''), tipo: get('tipo', 'Bolsas de Estudo'),
+    titulo: get('titulo', ''), tipo: get('tipo', 'Bolsas de Estudo'),
     link: get('link', ''), lingua: get('lingua', ''),
-    areaAtuacao: get('areaAtuacao', ''), custo: isNew ? 'Gratuito' : normalizeCusto(get('custo', '')), formato: get('formato', 'Remoto'),
-    local: get('local', ''), prazo: get('prazo', ''), dataInicio: get('dataInicio', ''),
+    areaAtuacao: get('areaAtuacao', ''), custo: isNew ? 'Gratuito' : normalizeCusto(get('custo', '')),
+    local: get('local', ''), prazo: get('prazo', ''),
     recursos: normalizeRecursos(get('recursos', [])),
     nivel: get('nivel', []), interesse: get('interesse', []),
     publicoAlvo: get('publicoAlvo', []) || [],
@@ -145,10 +145,7 @@ export default function OpportunityEditor({ opp, onCancel, onSave, onDelete, onR
         <Field label="Link da oportunidade" htmlFor="ed-link" hint="A página oficial de inscrição/informações.">
           <Input id="ed-link" type="url" value={form.link} onChange={(e) => set('link', e.target.value)} placeholder="https://..." />
         </Field>
-        <div className="ap-form-grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-          <Field label="Organização" htmlFor="ed-o"><Input id="ed-o" value={form.org} onChange={(e) => set('org', e.target.value)} /></Field>
-          <Field label="Área de atuação" htmlFor="ed-a"><Input id="ed-a" value={form.areaAtuacao} onChange={(e) => set('areaAtuacao', e.target.value)} placeholder="Ex.: Matemática" /></Field>
-        </div>
+        <Field label="Área de atuação" htmlFor="ed-a"><Input id="ed-a" value={form.areaAtuacao} onChange={(e) => set('areaAtuacao', e.target.value)} placeholder="Ex.: Matemática" /></Field>
         <Field label="Língua exigida" htmlFor="ed-lang" hint="Língua necessária para participar.">
           <Select id="ed-lang" value={form.lingua} onChange={(e) => set('lingua', e.target.value)}>
             <option value="">—</option>
@@ -184,39 +181,27 @@ export default function OpportunityEditor({ opp, onCancel, onSave, onDelete, onR
         </div>
       </EditorSection>
 
-      <EditorSection title="Datas e formato">
-        <div className="ap-form-grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-          <Field label="Prazo de inscrição" htmlFor="ed-p">
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <DatePicker
-                id="ed-p"
-                value={catalogDeadlineToInputValue(form.prazo)}
-                disabled={prazoContinuo}
-                onChange={(inputValue) => set('prazo', inputValueToCatalogDeadline(inputValue))}
-              />
-              <Checkbox
-                checked={prazoContinuo}
-                onChange={(e) => {
-                  const on = e.target.checked;
-                  setPrazoContinuo(on);
-                  set('prazo', on ? ROLLING_DEADLINE_TEXT : '');
-                }}
-                label="Inscrições contínuas (sem prazo fixo)"
-              />
-            </div>
-          </Field>
-          <Field label="Início"             htmlFor="ed-i"><Input id="ed-i" value={form.dataInicio} onChange={(e) => set('dataInicio', e.target.value)} placeholder="Ex.: Provas a partir de set 2026" /></Field>
-        </div>
-        <div className="ap-form-grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-          <Field label="Formato" htmlFor="ed-f">
-            <Select id="ed-f" value={form.formato} onChange={(e) => {
-              setForm((current) => ({ ...current, formato: e.target.value, local: e.target.value === 'Remoto' ? '' : current.local }));
-            }}>
-              <option>Remoto</option><option>Presencial</option><option>Híbrido</option>
-            </Select>
-          </Field>
-          {form.formato !== 'Remoto' && <Field label="Local" htmlFor="ed-l" hint="Informe onde acontecem as atividades presenciais."><Input id="ed-l" value={form.local} onChange={(e) => set('local', e.target.value)} placeholder="Ex.: Salvador, BA" /></Field>}
-        </div>
+      <EditorSection title="Prazo e local">
+        <Field label="Prazo de inscrição" htmlFor="ed-p">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <DatePicker
+              id="ed-p"
+              value={catalogDeadlineToInputValue(form.prazo)}
+              disabled={prazoContinuo}
+              onChange={(inputValue) => set('prazo', inputValueToCatalogDeadline(inputValue))}
+            />
+            <Checkbox
+              checked={prazoContinuo}
+              onChange={(e) => {
+                const on = e.target.checked;
+                setPrazoContinuo(on);
+                set('prazo', on ? ROLLING_DEADLINE_TEXT : '');
+              }}
+              label="Inscrições contínuas (sem prazo fixo)"
+            />
+          </div>
+        </Field>
+        <Field label="Local" htmlFor="ed-l" hint="Onde a oportunidade acontece (ex.: Remoto, ou uma cidade)."><Input id="ed-l" value={form.local} onChange={(e) => set('local', e.target.value)} placeholder="Ex.: Remoto, ou Salvador, BA" /></Field>
       </EditorSection>
 
       <EditorSection title="Conteúdo">

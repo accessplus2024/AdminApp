@@ -127,7 +127,7 @@ export default function Dashboard({ onOpen, onNew, perms = {} }) {
                 if (c.key === 'titulo') return (
                   <button onClick={() => onOpen && onOpen(r)} className="link-cell">
                     <div style={{ fontWeight: 600 }}>{r.titulo}</div>
-                    <div style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>{r.org}</div>
+                    <div style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>{r.areaAtuacao}</div>
                   </button>
                 );
                 if (c.key === 'tipo')     return <Badge variant={D.tipoVariant[r.tipo] || 'neutral'}>{r.tipo}</Badge>;

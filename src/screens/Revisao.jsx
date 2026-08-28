@@ -11,9 +11,7 @@ export default function Revisao({ onOpen, onEdit, onApprove, perms = {} }) {
 
   const todas = D.opportunities.filter((o) => o.status === 'Em revisão');
   const rows = q
-    ? todas.filter((o) =>
-        o.titulo.toLowerCase().includes(q.toLowerCase()) ||
-        o.org.toLowerCase().includes(q.toLowerCase()))
+    ? todas.filter((o) => o.titulo.toLowerCase().includes(q.toLowerCase()))
     : todas;
 
   const aprovar = async (o) => {
@@ -42,7 +40,7 @@ export default function Revisao({ onOpen, onEdit, onApprove, perms = {} }) {
                   <h3 style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 17, letterSpacing: '-0.01em' }}>{o.titulo}</h3>
                 </div>
                 <div style={{ fontSize: 13, color: 'var(--muted-foreground)', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
-                  {Ic('building-2', 'ico-xs')} {o.org} · {o.areaAtuacao}
+                  {Ic('target', 'ico-xs')} {o.areaAtuacao}
                 </div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                   <Badge variant={D.tipoVariant[o.tipo] || 'neutral'}>{o.tipo}</Badge>

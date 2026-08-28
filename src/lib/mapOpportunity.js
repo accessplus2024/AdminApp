@@ -19,6 +19,17 @@ const STATUS_UI = {
   Encerrada: 'Inscrições encerradas',
 };
 
+// Disponibilidade vem da coluna `inscricoes` ('Aberta' | 'Encerrada'): é ela
+// que diz se dá pra se inscrever (Aberta) ou se o prazo já passou (Encerrada).
+// Não confundir com qualification_status, que só diz se jovens brasileiros
+// são elegíveis — isso é para o Sentinel decidir, não é disponibilidade.
+function mapInscricoes(row) {
+  const valor = str(row.inscricoes).trim().toLowerCase();
+  if (valor === 'aberta') return true;
+  if (valor === 'encerrada') return false;
+  return null;
+}
+
 // resources (jsonb) do banco -> recursos que a tela de detalhe mostra.
 // Formato do banco (do scraper): { label, platform, url, status }
 // Formato da tela:               { plataforma, titulo, meta }
@@ -39,31 +50,14 @@ function toLista(texto) {
   return linhas.length > 1 ? linhas : [t];
 }
 
-export function parseOpportunityLocation(value) {
-  const raw = str(value).trim();
-  const normalized = raw.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
-  const hasRemote = /\b(remot[oa]s?|online|virtual)/.test(normalized);
-  const hasInPerson = /\b(presencia(?:l|is)|in-person)/.test(normalized);
-  const formato = /\bhibrid/.test(normalized) || (hasRemote && hasInPerson)
-    ? 'Híbrido'
-    : hasRemote ? 'Remoto' : hasInPerson ? 'Presencial' : (raw ? 'Presencial' : '');
-  if (formato === 'Remoto') return { formato, local: '' };
-  const local = raw
-    .replace(/^\s*(?:presencial|h[ií]brido)\s*(?:[—–-]|em|:)?\s*/i, '')
-    .trim();
-  return { formato, local: local || '' };
-}
-
 export function mapOpportunity(row) {
   const status = str(row.status);
-  const location = parseOpportunityLocation(row.location);
   return {
     // identidade
     id: row.id,
 
     // textos principais
     titulo: str(row.title),
-    org: str(row.location) || '',          // a base nao tem "organizacao"; usa local se houver
     descricao: str(row.description),
     link: str(row.link),                   // URL da oportunidade
     lingua: str(row.language),             // lingua exigida (campo unico no banco)
@@ -77,15 +71,15 @@ export function mapOpportunity(row) {
     custo: str(row.cost),
 
     // logistica
-    formato: location.formato,
-    local: location.local,
+    local: str(row.location),
     prazo: cap(row.deadline),              // '' quando não há prazo
 
     // status / estado
     status: STATUS_UI[status] || status || 'Rascunho',
-    // Disponibilidade não é o mesmo que fluxo editorial. Itens em revisão
-    // ficam sem disponibilidade conhecida, em vez de serem tratados como fechados.
-    inscricoesAbertas: status === 'Aprovada' ? true : status === 'Encerrada' ? false : null,
+    // Disponibilidade é um campo próprio (`inscricoes`), independente do fluxo
+    // editorial: uma oportunidade publicada pode estar com inscrições
+    // encerradas, e uma em revisão pode estar com inscrições abertas.
+    inscricoesAbertas: mapInscricoes(row),
     destaque: false,
 
     // detalhe

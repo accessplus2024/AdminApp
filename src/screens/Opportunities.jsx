@@ -24,7 +24,7 @@ export default function Opportunities({ onOpen, onNew, onEdit, perms = {} }) {
                   <h3 style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 17, letterSpacing: '-0.01em' }}>{o.titulo}</h3>
                 </div>
                 <div style={{ fontSize: 13, color: 'var(--muted-foreground)', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
-                  {Ic('building-2', 'ico-xs')} {o.org} · {o.areaAtuacao}
+                  {Ic('target', 'ico-xs')} {o.areaAtuacao}
                 </div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                   <Badge variant={D.tipoVariant[o.tipo] || 'neutral'}>{o.tipo}</Badge>

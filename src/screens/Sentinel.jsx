@@ -1024,6 +1024,8 @@ export default function Sentinel({ perms, opportunities = [], catalogLoading = f
                       pesquisa?.duplicados ? countLabel(pesquisa.duplicados, 'duplicata', 'duplicatas') : null,
                       pesquisa?.cancelado ? `pesquisa cancelada (${pesquisa.naoIniciados} item(ns) devolvido(s) à fila)` : null,
                       coleta?.limpeza ? countLabel(coleta.limpeza, 'registro antigo removido', 'registros antigos removidos') : null,
+                      coleta?.travadosLiberados?.requeued ? countLabel(coleta.travadosLiberados.requeued, 'item travado devolvido à fila', 'itens travados devolvidos à fila') : null,
+                      coleta?.travadosLiberados?.failed ? countLabel(coleta.travadosLiberados.failed, 'item travado movido para falhas', 'itens travados movidos para falhas') : null,
                       instagramResult?.erro ? `Instagram: ${instagramResult.erro}`
                         : instagramResult?.instagramAccounts === 0 ? 'Instagram desligado (nenhuma conta ativa)'
                         : instagramResult ? countLabel(instagramResult.created || 0, 'oportunidade do Instagram enviada para revisão', 'oportunidades do Instagram enviadas para revisão')
