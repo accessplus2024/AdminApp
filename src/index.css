@@ -431,6 +431,10 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; }
   .ap-resource-row { grid-template-columns: 1fr !important; }
   .opp-row { flex-direction: column !important; align-items: stretch !important; }
   .opp-row-actions { width: 100% !important; align-items: stretch !important; }
+  /* O "stretch" acima é pro bloco de prazo/comentários ocupar a linha toda.
+     O badge de status não deve esticar junto: como flex item ele viraria uma
+     pílula da largura da tela com o texto perdido na ponta esquerda. */
+  .opp-row-actions > .ap-badge { align-self: flex-start !important; }
   .opp-row-actions > div:last-child { justify-content: flex-start !important; }
 }
 
