@@ -18,6 +18,7 @@ import TagManager from './screens/TagManager';
 import Revisao from './screens/Revisao';
 import Newsletter from './screens/Newsletter';
 import Sentinel from './screens/Sentinel';
+import Submissoes from './screens/Submissoes';
 import Team from './screens/Team';
 import { researchCatalogOpportunities } from './lib/sentinel';
 
@@ -26,6 +27,7 @@ const TITLES = {
   oportunidades: 'Oportunidades',
   revisao:       'Em revisão',
   sentinel:      'Sentinel',
+  submissoes:    'Submissões',
   newsletter:    'Newsletter',
   time:          'Membros do time',
   //config:        'Configurações',
@@ -35,10 +37,11 @@ const SUBS = {
   oportunidades: 'Crie, filtre, edite e publique as oportunidades visíveis para os estudantes.',
   revisao:       'Oportunidades aguardando aprovação antes de irem pro ar.',
   sentinel:      'Encontre oportunidades (Instagram + sites/fóruns), filtre e pesquise antes da revisão editorial.',
+  submissoes:    'Oportunidades enviadas por organizações pelo formulário público do site.',
   newsletter:    'Monte edições com o catálogo e mantenha o histórico de cada oportunidade.',
   time:          'Gerencie quem tem acesso ao painel e suas permissões.',
 };
-const VALID_SCREENS = ['dashboard', 'oportunidades', 'revisao', 'sentinel', 'newsletter', 'time'];
+const VALID_SCREENS = ['dashboard', 'oportunidades', 'revisao', 'sentinel', 'submissoes', 'newsletter', 'time'];
 
 export default function App() {
   // --- Autenticação ---
@@ -307,6 +310,8 @@ export default function App() {
       );
   } else if (active === 'sentinel') {
     screen = <Sentinel perms={perms} opportunities={opportunities} catalogLoading={opportunitiesLoading} onCatalogChanged={reloadOpportunities} />;
+  } else if (active === 'submissoes') {
+    screen = <Submissoes perms={perms} />;
   } else if (active === 'newsletter') {
     screen = <Newsletter opportunities={opportunities} perms={perms} />;
   } else if (active === 'time') {

@@ -12,6 +12,7 @@ const D = {
     { id: 'oportunidades', label: 'Oportunidades',   icon: 'Compass' },
     { id: 'revisao',       label: 'Em revisão',      icon: 'FilePen' },
     { id: 'sentinel',      label: 'Sentinel',        icon: 'Radar' },
+    { id: 'submissoes',    label: 'Submissões',      icon: 'Inbox' },
     { id: 'newsletter',    label: 'Newsletter',      icon: 'Newspaper' },
     { id: 'time',          label: 'Membros do time', icon: 'UsersRound' },
   ],
