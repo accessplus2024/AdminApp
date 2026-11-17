@@ -7,6 +7,7 @@ import { isSupabaseConfigured } from '../lib/supabase';
 import { idDoBanco } from '../lib/opportunities';
 import { availabilityVariant, OPPORTUNITY_AVAILABILITY, opportunityAvailability } from '../lib/opportunityAvailability';
 import { enrichApprovedOpportunityNow } from '../lib/scraperWeb';
+import OpportunityProposals from './OpportunityProposals';
 
 const PLAT = {
   youtube:   { label: 'YouTube',   icon: 'youtube',        color: '#FF0000' },
@@ -157,7 +158,7 @@ export default function OpportunityDetail({ opp, onBack, onEdit, onDelete, onTog
       </Card>
 
       {/* Body grid */}
-      <div className="ap-detail-grid" style={{ display: 'grid', gridTemplateColumns: '1.7fr 1fr', gap: 20, alignItems: 'start' }}>
+      <div className="ap-detail-grid" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.6fr) minmax(0, 1fr)', gap: 20, alignItems: 'start' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20, minWidth: 0 }}>
           {opp.descricao && (
             <Section icon="align-left" title="Descrição">
@@ -305,7 +306,15 @@ export default function OpportunityDetail({ opp, onBack, onEdit, onDelete, onTog
         </div>
 
         {/* Sidebar */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 20, position: 'sticky', top: 84 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 20, minWidth: 0, alignSelf: 'stretch' }}>
+          {isSupabaseConfigured && (
+            <OpportunityProposals
+              opportunityId={idDoBanco(opp)}
+              canWrite={!!perms.canWrite}
+              onApplied={() => onRefresh && onRefresh(opp)}
+            />
+          )}
+          <div style={{ position: 'sticky', top: 84 }}>
           <Card>
             <CardHeader><CardTitle style={{ fontSize: 15 }}>Resumo</CardTitle></CardHeader>
             <CardBody style={{ display: 'flex', flexDirection: 'column', gap: 14, paddingTop: 10 }}>
@@ -317,7 +326,7 @@ export default function OpportunityDetail({ opp, onBack, onEdit, onDelete, onTog
               <Fact icon="target"      label="Área de atuação"    value={opp.areaAtuacao} />
             </CardBody>
           </Card>
-
+          </div>
         </div>
       </div>
 

@@ -315,7 +315,7 @@ function ProposedValueEditor({ field, value, changed, onChange, onDone, onReset 
   );
 }
 
-function ProposalCard({ proposal, selection, edits = {}, onToggleField, onEditField, onResetField, onApply, onReject, busy }) {
+export function ProposalCard({ proposal, selection, edits = {}, onToggleField, onEditField, onResetField, onApply, onReject, busy, compact = false }) {
   const [editingField, setEditingField] = useState(null);
   const status = PROPOSAL_STATUS[proposal.status] || PROPOSAL_STATUS.pending;
   const changes = Object.entries(proposal.changes || {})
@@ -324,7 +324,7 @@ function ProposalCard({ proposal, selection, edits = {}, onToggleField, onEditFi
   const selectedFields = selection || changes.map(([field]) => field);
   const researchedSources = proposal.evidence?._sentinel?.sources || [];
   return (
-    <Card className={`research-proposal${proposal.status !== 'pending' ? ' research-proposal--reviewed' : ''}`}>
+    <Card className={`research-proposal${proposal.status !== 'pending' ? ' research-proposal--reviewed' : ''}${compact ? ' research-proposal--compact' : ''}`}>
       <CardHeader className="research-proposal-header">
         <div>
           <div className="research-proposal-title"><CardTitle style={{ fontSize: 16 }}>{proposal.opportunity?.title || proposal.original?.title || 'Oportunidade removida'}</CardTitle>{proposal.source_url && <a href={proposal.source_url} target="_blank" rel="noreferrer" aria-label="Abrir fonte">{Ic('external-link', 'ico-xs')}</a>}</div>

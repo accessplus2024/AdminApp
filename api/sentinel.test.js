@@ -519,6 +519,105 @@ describe('Sentinel proposal edits', () => {
     }, [{ url: 'https://example.org/apply', text: quote }]).valid).toBe(false);
   });
 
+  test('aceita "Deadline December 31st" e "applications ... are due" como prazo', () => {
+    const vtsp = 'Priority Decision Round Is Open! Deadline December 31st, 2026. Apply Now.';
+    expect(validateFieldEvidence('deadline', '31 de dezembro de 2026', {
+      quote: 'Deadline December 31st, 2026.', source_url: 'https://example.org/', kind: 'application_deadline',
+    }, [{ url: 'https://example.org/', text: vtsp }]).valid).toBe(true);
+    const euler = 'Applications for the winter 2027 classes are due November 22nd, 2026 . After that, we will continue to accept applications on a rolling basis.';
+    expect(validateFieldEvidence('deadline', '22 de novembro de 2026', {
+      quote: 'Applications for the winter 2027 classes are due November 22nd, 2026 .', source_url: 'https://example.org/apply', kind: 'application_deadline',
+    }, [{ url: 'https://example.org/apply', text: euler }]).valid).toBe(true);
+    expect(validateFieldEvidence('deadline', '8 de junho de 2027', {
+      quote: 'Session I: June 8 to July 16, 2027', source_url: 'https://example.org/', kind: 'application_deadline',
+    }, [{ url: 'https://example.org/', text: 'Session I: June 8 to July 16, 2027' }]).valid).toBe(false);
+  });
+
+  test('aceita elegibilidade escrita no plural ("students", "grades", "aged")', () => {
+    const quote = 'International students in the equivalent of U.S. grades 6-12 and aged 18 years or younger may also participate.';
+    expect(validateFieldEvidence('eligibility', 'Ter 18 anos ou menos', {
+      quote, source_url: 'https://example.org/rules', kind: 'field_evidence',
+    }, [{ url: 'https://example.org/rules', text: quote }]).valid).toBe(true);
+  });
+
+  test('nomes próprios e domínios em inglês não reprovam texto em português', () => {
+    expect(isPortugueseCatalogValue('description', 'É uma conferência virtual organizada pela Harvard Undergraduate Foreign Policy Initiative para alunos do ensino médio.')).toBe(true);
+    expect(isPortugueseCatalogValue('process', 'Fazer a inscrição no portal de candidatura da AFS (application.afs.org).')).toBe(true);
+    expect(isPortugueseCatalogValue('process', 'Submit the application form before the deadline.')).toBe(false);
+    expect(isPortugueseCatalogValue('cost', 'fully funded')).toBe(false);
+  });
+
+  test('data sem ano vale para a próxima ocorrência, mesmo perto do ano do ciclo seguinte', () => {
+    const text = 'Priority Decision Round for VTSP 2027 Is Open! Deadline December 31st. Apply Now.';
+    const nextYear = new Date().getUTCFullYear() + 1;
+    const evidence = { quote: 'Deadline December 31st.', source_url: 'https://example.org/', kind: 'application_deadline' };
+    const sources = [{ url: 'https://example.org/', text }];
+    expect(validateFieldEvidence('deadline', `31 de dezembro de ${nextYear - 1}`, evidence, sources).valid).toBe(true);
+    expect(validateFieldEvidence('deadline', `31 de dezembro de ${nextYear}`, evidence, sources).valid).toBe(true);
+    expect(validateFieldEvidence('deadline', `31 de dezembro de ${nextYear + 1}`, evidence, sources).valid).toBe(false);
+  });
+
+  test('não marca encerrada quando a fonte anuncia inscrições abertas', () => {
+    const text = 'Applications for the 2027 Aspire Leaders Program are OPEN! Register your profile and fill out our application HERE before the January 10, 2027 deadline. Applications for the 2026 Leadership Accelerator Powered by AI are currently closed.';
+    expect(findExplicitClosedApplications([{ url: 'https://example.org/', text }])).toBeNull();
+    expect(findExplicitClosedApplications([{ url: 'https://example.org/', text: 'Applications for the 2026 program are closed.' }])).not.toBeNull();
+    expect(validateFieldEvidence('deadline', '10 de janeiro de 2027', {
+      quote: 'Register your profile and fill out our application HERE before the January 10, 2027 deadline.', source_url: 'https://example.org/', kind: 'application_deadline',
+    }, [{ url: 'https://example.org/', text }]).valid).toBe(true);
+  });
+
+  test('reconhece alcance internacional escrito como "abroad", "outside of the U.S." ou sem restrição geográfica', () => {
+    const cases = [
+      ['CodeYourSelf is open to eligible students in Grades 3-12, including students from the U.S. and abroad.'],
+      ['BMT is open to all students 12th grade and below. If you attend school outside of the U.S., see our grade equivalents.'],
+      ['All high school students are eligible to apply. Due to the virtual nature of the program, there are no geography-based restrictions.'],
+      ['Nationality/Citizenship or Country of Legal Residence: Brazil. Must be 15-17.5 years old at the program start date'],
+    ];
+    for (const [quote] of cases) {
+      const result = normalizeQualification({ verdict: 'qualified', reason: 'ok', evidence: [{ quote, source_url: 'https://example.org/' }] }, [{ url: 'https://example.org/', text: quote, authority: 'official_rules_or_application' }]);
+      expect(result.verdict).toBe('qualified');
+    }
+  });
+
+  test('aceita "Submit your pitch by" e "Pitches are due" como prazo', () => {
+    const text = 'Submit your pitch by February 21, 2027 at midnight in the time zone where you are located. Pitches are due February 21, 2027.';
+    for (const quote of ['Submit your pitch by February 21, 2027 at midnight in the time zone where you are located.', 'Pitches are due February 21, 2027.']) {
+      expect(validateFieldEvidence('deadline', '21 de fevereiro de 2027', { quote, source_url: 'https://example.org/', kind: 'application_deadline' }, [{ url: 'https://example.org/', text }]).valid).toBe(true);
+    }
+  });
+
+  test('"December 31st is your deadline" comprova prazo e página de outra modalidade não é recuperada', () => {
+    const text = 'December 31st is also our deadline for ALL COUNTRIES/REGIONS NOT LISTED HERE. If you do not see your country or state elsewhere on this list, December 31st is your deadline.';
+    const sources = [
+      { url: 'https://example.org/crs', text, authority: 'official_rules_or_application' },
+      { url: 'https://example.org/2yc', text: 'Applications to be a second-year camper at CRS or in TELE are due on January 15th, 2027.', authority: 'unrelated_same_host_page' },
+    ];
+    expect(validateFieldEvidence('deadline', '31 de dezembro de 2026', { quote: text, source_url: 'https://example.org/crs' }, sources).valid).toBe(true);
+    expect(findRelevantDeadlineEvidence(sources, new Date('2026-11-17'), { title: 'Camp Rising Sun' })).toBeNull();
+    const counselor = [{ url: 'https://example.org/counselor', authority: 'linked_application_platform', text: 'If you are interested in this position, please use this Google form to apply (priority deadline April 6, final deadline May 1, 2027) or reach out.' }];
+    expect(findRelevantDeadlineEvidence(counselor, new Date('2026-11-17'), { title: 'SPINWIP' })).toBeNull();
+  });
+
+  test('data de nascimento comprova elegibilidade', () => {
+    const quote = 'For 2027, this means your birthday must be between August 26th, 2010 and June 26th, 2012.';
+    expect(validateFieldEvidence('eligibility', 'Ter nascido entre 2010 e 2012', { quote, source_url: 'https://example.org/' }, [{ url: 'https://example.org/', text: quote }]).valid).toBe(true);
+  });
+
+  test('"open to Foreign Nationals" comprova alcance a brasileiros', () => {
+    const quote = 'The internship is open to Foreign Nationals and U.S. Citizens. Undergraduate students who have completed at least 50 semester hours of credit are eligible.';
+    for (const reach of ['You can apply from anywhere in the world. You should be at least 15 years old when your camp session starts.']) {
+      expect(normalizeQualification({ verdict: 'qualified', reason: 'ok', evidence: [{ quote: reach, source_url: 'https://example.org/' }] }, [{ url: 'https://example.org/', text: reach, authority: 'official_rules_or_application' }]).verdict).toBe('qualified');
+    }
+    const result = normalizeQualification({ verdict: 'qualified', reason: 'aberto', evidence: [{ quote, source_url: 'https://example.org/' }] }, [{ url: 'https://example.org/', text: quote, authority: 'official_rules_or_application' }]);
+    expect(result.verdict).toBe('qualified');
+  });
+
+  test('"Must be from a Sub-Saharan African country" exclui brasileiros', () => {
+    const quote = 'Must be from a Sub-Saharan African country';
+    const result = normalizeQualification({ verdict: 'unqualified', reason: 'restrito', evidence: [{ quote, source_url: 'https://example.org/' }] }, [{ url: 'https://example.org/', text: quote, authority: 'official_rules_or_application' }]);
+    expect(result.verdict).toBe('unqualified');
+  });
+
   test('recupera um único prazo completo diretamente do texto oficial', () => {
     const source = {
       url: 'https://example.org/apply',

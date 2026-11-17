@@ -75,10 +75,25 @@ export const isRollingDeadline = (value) => semAcento(value).trim().toLowerCase(
 // data reconhecível (contínuo, "agosto de 2026" sem dia, vazio) devolve
 // false: a newsletter é sobre urgência ("inscreva-se logo"), então uma
 // oportunidade sem data clara não compete por esse espaço.
-export function isDeadlineWithinNextMonth(value, today = new Date()) {
+// Janela padrão da newsletter: de hoje até o fim do próximo mês.
+export function defaultNewsletterWindow(today = new Date()) {
+  return {
+    start: new Date(today.getFullYear(), today.getMonth(), today.getDate()),
+    end: new Date(today.getFullYear(), today.getMonth() + 2, 0, 23, 59, 59, 999),
+  };
+}
+
+// Prazo completo entre start e end (inclusive, dias inteiros). Prazo contínuo,
+// só com mês ou vazio nunca entra.
+export function isDeadlineWithinRange(value, start, end) {
   const date = parseCatalogDeadline(value);
   if (!date) return false;
-  const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-  const endOfNextMonth = new Date(today.getFullYear(), today.getMonth() + 2, 0, 23, 59, 59, 999);
-  return date >= startOfToday && date <= endOfNextMonth;
+  const from = start ? new Date(start.getFullYear(), start.getMonth(), start.getDate()) : null;
+  const to = end ? new Date(end.getFullYear(), end.getMonth(), end.getDate(), 23, 59, 59, 999) : null;
+  return (!from || date >= from) && (!to || date <= to);
+}
+
+export function isDeadlineWithinNextMonth(value, today = new Date()) {
+  const { start, end } = defaultNewsletterWindow(today);
+  return isDeadlineWithinRange(value, start, end);
 }

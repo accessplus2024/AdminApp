@@ -2,7 +2,16 @@ import { useEffect, useMemo, useState } from 'react';
 import { Badge, Button, Card, CardBody, CardHeader, CardTitle, Input, OpportunityFilters, Select, Tabs, Textarea, useOpportunityFilters } from '../components';
 import { Ic } from '../lib/icons';
 import { buildNewsletterHtml, slugify } from '../lib/newsletterHtml';
-import { isDeadlineWithinNextMonth } from '../lib/deadline';
+import { defaultNewsletterWindow, isDeadlineWithinRange, parseCatalogDeadline } from '../lib/deadline';
+
+// yyyy-mm-dd (valor de <input type="date">) <-> Date local, sem fuso UTC.
+const toDateInput = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+const fromDateInput = (value) => {
+  const [year, month, day] = String(value || '').split('-').map(Number);
+  return year && month && day ? new Date(year, month - 1, day) : null;
+};
+const shortDate = (date) => date ? date.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' }) : '…';
+import { isRecentlyFeatured as featuredWithinRepeatWindow } from '../lib/newsletterRecords.js';
 import {
   DEFAULT_ISSUE,
   deleteNewsletterIssue,
@@ -80,6 +89,14 @@ export default function Newsletter({ opportunities, perms }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState(null);
+  // Intervalo de prazos do catálogo aprovado. Padrão: hoje até o fim do
+  // próximo mês (a mesma regra do servidor MCP), mas editável para montar
+  // uma edição futura.
+  const defaultWindow = useMemo(() => defaultNewsletterWindow(), []);
+  const [windowStart, setWindowStart] = useState(() => toDateInput(defaultWindow.start));
+  const [windowEnd, setWindowEnd] = useState(() => toDateInput(defaultWindow.end));
+  const isDefaultWindow = windowStart === toDateInput(defaultWindow.start) && windowEnd === toDateInput(defaultWindow.end);
+  const resetWindow = () => { setWindowStart(toDateInput(defaultWindow.start)); setWindowEnd(toDateInput(defaultWindow.end)); };
 
   const refresh = async (preferredId) => {
     try {
@@ -102,10 +119,20 @@ export default function Newsletter({ opportunities, perms }) {
   // de tudo que já foi aprovado algum dia. Prazo contínuo/sem data
   // reconhecível fica de fora do catálogo aprovado por padrão (ver
   // src/lib/deadline.js) — pedido explícito.
-  const publishedOpportunities = useMemo(() => (opportunities || []).filter((opportunity) =>
+  const approvedOpportunities = useMemo(() => (opportunities || []).filter((opportunity) =>
     opportunity.status === 'Publicada'
-    && opportunity.qualificacao !== 'unqualified'
-    && isDeadlineWithinNextMonth(opportunity.prazo)), [opportunities]);
+    && opportunity.qualificacao !== 'unqualified'), [opportunities]);
+  const rangeStart = fromDateInput(windowStart);
+  const rangeEnd = fromDateInput(windowEnd);
+  const publishedOpportunities = useMemo(() => approvedOpportunities.filter((opportunity) =>
+    isDeadlineWithinRange(opportunity.prazo, rangeStart, rangeEnd)), [approvedOpportunities, windowStart, windowEnd]);
+  // Aprovadas que ficaram de fora, por motivo, para o "onde está minha
+  // oportunidade?" ter resposta na própria tela.
+  const outsideWindow = useMemo(() => {
+    const rest = approvedOpportunities.filter((opportunity) => !publishedOpportunities.includes(opportunity));
+    const noDate = rest.filter((opportunity) => !parseCatalogDeadline(opportunity.prazo)).length;
+    return { noDate, otherDates: rest.length - noDate };
+  }, [approvedOpportunities, publishedOpportunities]);
   const opportunityFilter = useOpportunityFilters(publishedOpportunities);
   const selectedIds = useMemo(() => new Set(entries.map((entry) => String(entry.opportunity_id))), [entries]);
 
@@ -120,12 +147,10 @@ export default function Newsletter({ opportunities, perms }) {
   // novo (o prazo dela já teria que estar renovado pra passar no filtro de
   // "dentro do próximo mês" acima, então isso na prática só destrava edições
   // recorrentes de verdade, não a mesma data velha).
-  const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
+  // A janela (NEWSLETTER_REPEAT_WINDOW_MS) mora em src/lib/newsletterRecords.js,
+  // compartilhada com o servidor MCP.
   const lastFeaturedInfo = (id) => featured[id] || null;
-  const isRecentlyFeatured = (id) => {
-    const info = lastFeaturedInfo(id);
-    return !!info?.date && (Date.now() - new Date(info.date).getTime()) < ONE_YEAR_MS;
-  };
+  const isRecentlyFeatured = (id) => featuredWithinRepeatWindow(lastFeaturedInfo(id));
 
   const available = useMemo(() => opportunityFilter.rows
     .filter((opportunity) => {
@@ -287,8 +312,22 @@ export default function Newsletter({ opportunities, perms }) {
 
         <aside className="opportunity-palette">
           <Card>
-            <CardHeader><CardTitle style={{ fontSize: 16 }}>Catálogo aprovado</CardTitle><p className="card-helper">Só oportunidades publicadas aparecem aqui. Adicionar não muda sua exibição no site. Enviada numa edição publicada nos últimos 12 meses? Fica oculta aqui pra não ser enviada de novo por engano.</p></CardHeader>
+            <CardHeader><CardTitle style={{ fontSize: 16 }}>Catálogo aprovado</CardTitle><p className="card-helper">Só oportunidades publicadas, com prazo completo dentro do intervalo abaixo. Adicionar não muda sua exibição no site. Enviada numa edição publicada nos últimos 12 meses? Fica oculta aqui pra não ser enviada de novo por engano.</p></CardHeader>
             <CardBody>
+              <div className="newsletter-window">
+                <div className="newsletter-window-label">
+                  <strong>Prazo entre {shortDate(rangeStart)} e {shortDate(rangeEnd)}</strong>
+                  {!isDefaultWindow && <button type="button" className="newsletter-window-reset" onClick={resetWindow}>Voltar ao padrão</button>}
+                </div>
+                <div className="newsletter-window-fields">
+                  <Field label="De"><Input type="date" value={windowStart} max={windowEnd || undefined} onChange={(event) => setWindowStart(event.target.value)} /></Field>
+                  <Field label="Até"><Input type="date" value={windowEnd} min={windowStart || undefined} onChange={(event) => setWindowEnd(event.target.value)} /></Field>
+                </div>
+                <small>
+                  {isDefaultWindow ? 'Padrão: de hoje até o fim do próximo mês. ' : ''}
+                  Fora do intervalo: {outsideWindow.otherDates} com outro prazo e {outsideWindow.noDate} sem data completa (contínuo, só o mês ou vazio — corrija o prazo no catálogo para aparecerem).
+                </small>
+              </div>
               <OpportunityFilters controller={opportunityFilter} total={publishedOpportunities.length} compact placeholder="Buscar no catálogo aprovado…" />
               <div className="opportunity-palette-list">
                 {available.length === 0 ? <div className="workflow-empty">Nenhuma oportunidade disponível para este filtro.</div> : available.map((opportunity) => {

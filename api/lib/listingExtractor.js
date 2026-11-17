@@ -12,15 +12,20 @@
 // decision — this step is cheap (one call per source, not per candidate).
 
 import OpenAI from 'openai';
+import { modelProviderConfig } from './modelProvider.js';
 
-const MODEL = 'z-ai/glm-5.2';
+// Com um provedor próprio (SENTINEL_BASE_URL), o modelo padrão da NVIDIA não
+// existe lá: usa SENTINEL_LISTING_MODEL ou o primeiro de SENTINEL_MODELS.
+const MODEL = process.env.SENTINEL_LISTING_MODEL
+  || (process.env.SENTINEL_BASE_URL && String(process.env.SENTINEL_MODELS || '').split(',')[0].trim())
+  || 'z-ai/glm-5.2';
 const TIMEOUT_MS = 45_000;
 
 let client = null;
 function nvidiaClient() {
-  if (!process.env.NVIDIA_API_KEY) throw new Error('NVIDIA_API_KEY não configurada no servidor.');
   if (!client) {
-    client = new OpenAI({ apiKey: process.env.NVIDIA_API_KEY, baseURL: 'https://integrate.api.nvidia.com/v1', timeout: TIMEOUT_MS, maxRetries: 0 });
+    const { apiKey, baseURL } = modelProviderConfig();
+    client = new OpenAI({ apiKey, baseURL, timeout: TIMEOUT_MS, maxRetries: 0 });
   }
   return client;
 }
