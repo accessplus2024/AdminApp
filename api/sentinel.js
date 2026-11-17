@@ -2,6 +2,7 @@ import { ApifyClient } from 'apify-client';
 import OpenAI from 'openai';
 import { createClient } from '@supabase/supabase-js';
 import { releaseStalePendingPosts } from './lib/staleRecovery.js';
+import { modelProviderConfig } from './lib/modelProvider.js';
 
 export const config = { maxDuration: 300 };
 
@@ -64,7 +65,7 @@ const QUALIFICATION_VERDICTS = new Set(['qualified', 'unqualified', 'uncertain']
 // Em vez de depender só de o modelo escolher a frase "ideal", a lista
 // também reconhece esse jeito comum de descrever alcance internacional sem
 // usar a palavra "international" (contagem de países, em vez de nome).
-const BRAZIL_REACH_PATTERN = /\b(?:brasil|brazil|brasileir[oa]s?|brazilian|international students?|internationally|all nationalities|any nationality|open to all nationals|all countries|any country|worldwide|global(?:ly)?|from every country|from around the world|(?:from |applicants )?all over the world|every corner of the (?:world|globe)|around the globe|(?:other|several|many|various|numerous|\d+|over \d+) (?:other )?countries|hosted? students? from|come from .{0,40}countries|qualquer nacionalidade|todas as nacionalidades|qualquer pais|todos os paises|mundo inteiro|outros paises|varios paises|diversos paises|diferentes paises)\b/i;
+const BRAZIL_REACH_PATTERN = /\b(?:brasil|brazil|brasileir[oa]s?|brazilian|international students?|internationally|all nationalities|any nationality|open to all nationals|all countries|any country|worldwide|global(?:ly)?|from every country|from around the world|(?:from |applicants )?all over the world|every corner of the (?:world|globe)|around the globe|(?:other|several|many|various|numerous|\d+|over \d+) (?:other )?countries|hosted? students? from|come from .{0,40}countries|abroad|around the world|anywhere in the world|foreign (?:nationals?|citizens?|students?)|non-u\.?s\.? (?:citizens?|nationals?|students?)|outside (?:of )?the (?:u\.?s\.?a?\.?|united states)|no geograph(?:y|ic|ical)[- ](?:based )?restrictions|qualquer nacionalidade|todas as nacionalidades|qualquer pais|todos os paises|mundo inteiro|outros paises|varios paises|diversos paises|diferentes paises)\b/i;
 const BRAZIL_LOCAL_REACH_PATTERN = /\b(?:acre|acrean[oa]s?|alagoas|alagoan[oa]s?|amapa|amapaense?s?|amazonas|amazonense?s?|bahia|baian[oa]s?|ceara|cearense?s?|distrito federal|brasiliense?s?|espirito santo|capixaba?s?|goias|goian[oa]s?|maranhao|maranhense?s?|mato grosso(?: do sul)?|mato-grossense?s?|sul-mato-grossense?s?|minas gerais|mineir[oa]s?|(?:estado do|no|do) para|paraense?s?|paraiba|paraiban[oa]s?|parana|paranaense?s?|pernambuco|pernambucan[oa]s?|piaui|piauiense?s?|rio de janeiro|fluminense?s?|carioca?s?|rio grande do norte|potiguar(?:es)?|rio grande do sul|gauch[oa]s?|rondonia|rondoniense?s?|roraima|roraimense?s?|santa catarina|catarinense?s?|sao paulo|paulista?s?|sergipe|sergipan[oa]s?|tocantins|tocantinense?s?)\b/i;
 // Inclui também "sem limite de idade"/"todas as idades" — caso real: Jan
 // Michalski Switzerland Residency Program dizia "Applicants of all
@@ -80,7 +81,7 @@ const BRAZIL_LOCAL_REACH_PATTERN = /\b(?:acre|acrean[oa]s?|alagoas|alagoan[oa]s?
 // de aluno em gap year, só que sem usar nenhuma das palavras de "jovem/
 // estudante" já cobertas. "Volunteer"/"no prior experience"/"gap year" viram
 // sinal de público jovem tanto quanto "student"/"youth".
-const YOUTH_PARTICIPATION_PATTERN = /\b(?:youth|young people|young person|student|students|school|college|university|undergraduate|teen|adolesc|jovens?|juventude|estudantes?|alun[oa]s?|universitari[oa]s?|graduand[oa]s?|ensino|escola|matriculad[oa]s?|volunteers?|gap year|no (?:specific formal qualifications|prior experience|previous experience|experience necessary)|no (?:experience|qualifications?) (?:needed|required|necessary)|no age (?:limit|restriction|requirement)|all ages|any age|sem limite de idade|sem restri[cç][aã]o de idade|qualquer idade|todas as idades)\b/i;
+const YOUTH_PARTICIPATION_PATTERN = /\b(?:\d{1,2}(?:\.\d)?\s*(?:-|–|to)\s*\d{1,2}(?:\.\d)?\s+years?\s+old|(?:at least|aged?|ages|between)\s+1[0-9]\b|1[0-9]\s+years?\s+old|youth|young people|young person|student|students|school|college|university|undergraduate|teen|adolesc|jovens?|juventude|estudantes?|alun[oa]s?|universitari[oa]s?|graduand[oa]s?|ensino|escola|matriculad[oa]s?|volunteers?|gap year|no (?:specific formal qualifications|prior experience|previous experience|experience necessary)|no (?:experience|qualifications?) (?:needed|required|necessary)|no age (?:limit|restriction|requirement)|all ages|any age|sem limite de idade|sem restri[cç][aã]o de idade|qualquer idade|todas as idades)\b/i;
 // Caso real: AI Civic Action Accelerator 2026 tinha "Applicant(s) must live
 // in the United States or are US citizens or permanent residents living
 // abroad" — nenhuma das frases antigas ("must be a citizen", "citizens or
@@ -95,7 +96,7 @@ const YOUTH_PARTICIPATION_PATTERN = /\b(?:youth|young people|young person|studen
 // derrubando um veredito "qualified" correto pra "uncertain" nesse caso real
 // (coberto por teste). Mantém só frases que combinam a palavra genérica com
 // um substantivo de cidadania/residência ao lado (bem mais específico).
-const PARTICIPATION_EXCLUSION_PATTERN = /\b(?:only (?:citizens?|residents?|nationals?) (?:of|from)|exclusiv(?:e|ely|amente) (?:for|to|pra|para)\s+(?:citizens?|residents?|nationals?|cidad[aã]os?|residentes?)|must be (?:a |an )?(?:citizen|resident|national)|must (?:live|reside) in|permanent residents?|citizens? or (?:permanent )?residents?( of)?|citizens? and residents? of|open only to|not eligible|cannot apply|ineligible|somente (?:citizens?|residents?|nationals?|cidad[aã]os?|residentes?)|apenas (?:citizens?|residents?|nationals?|cidad[aã]os?|residentes?)|deve ser (?:cidad[aã]o|residente)|n[aã]o (?:pode|podem|eleg[ií]vel|aceita))\b/i;
+const PARTICIPATION_EXCLUSION_PATTERN = /\b(?:must be (?:from|based in) (?:an? )?(?!brazil|brasil)[a-z-]+(?: [a-z-]+){0,3} (?:countr(?:y|ies)|nations?)\b|only (?:citizens?|residents?|nationals?) (?:of|from)|exclusiv(?:e|ely|amente) (?:for|to|pra|para)\s+(?:citizens?|residents?|nationals?|cidad[aã]os?|residentes?)|must be (?:a |an )?(?:citizen|resident|national)|must (?:live|reside) in|permanent residents?|citizens? or (?:permanent )?residents?( of)?|citizens? and residents? of|open only to (?:citizens?|residents?|nationals?|(?:applicants|students|candidates|people|individuals|youth|those) (?:from|in|of|living|based|residing))|not eligible|cannot apply|ineligible|somente (?:citizens?|residents?|nationals?|cidad[aã]os?|residentes?)|apenas (?:citizens?|residents?|nationals?|cidad[aã]os?|residentes?)|deve ser (?:cidad[aã]o|residente)|n[aã]o (?:pode|podem|eleg[ií]vel|aceita))\b/i;
 const BRAZIL_EXCLUSION_PATTERN = /\b(?:brazil(?:ian)?|brasil(?:eir[oa]s?)?).{0,80}\b(?:not eligible|cannot apply|ineligible|excluded|nao (?:pode|podem|e elegivel|sao elegiveis)|excluid[oa]s?)\b|\b(?:not eligible|cannot apply|ineligible|excluded|nao (?:pode|podem|e elegivel|sao elegiveis)|excluid[oa]s?).{0,80}\b(?:brazil(?:ian)?|brasil(?:eir[oa]s?)?)\b|\b(?:except|excluding|exceto|menos)\s+(?:o\s+)?(?:brazil|brasil)\b/i;
 
 // Caso real: Allan Gray Scholarship ("Country: South Africa / Citizenship
@@ -140,7 +141,7 @@ const SCOPE_INCLUSIVE_FALLBACK = /\b(?:worldwide|global(?:ly)?|international(?:l
 function findStructuralIneligibilityQuote(text) {
   const t = normalizedText(text);
   if (BRAZIL_REACH_PATTERN.test(t) || BRAZIL_LOCAL_REACH_PATTERN.test(t)) return null;
-  return STRUCTURAL_INELIGIBILITY_PATTERN.exec(t)?.[0] || null;
+  return structuralIneligibilityMatch(t)?.[0] || null;
 }
 
 function findScopeRestrictionQuote(text) {
@@ -178,7 +179,7 @@ function findScopeRestrictionQuote(text) {
 // função (só quem já tem autorização legal pra trabalhar no Reino Unido pode
 // participar; um jovem brasileiro sem esse direito não atende, mesmo que a
 // fonte nunca mencione nacionalidade).
-const GEO_EXCLUSION_PHRASE_PATTERN = /\bmust be (?:a |an )?(?:citizen|resident|national)\b|\bmust (?:live|reside) in\b|\bpermanent residents?\b|\bcitizens? or (?:permanent )?residents?( of)?\b|\bcitizens? and residents? of\b|\bopen only to\b|\bpassport issued by\b|\baccredited (?:four-year )?u\.?s\.?(?:-style)? (?:college|university|institution)\b|\benrolled (?:in|at) an? (?:accredited )?(?:u\.?s\.?|american) (?:college|university|institution)\b|\battending an? (?:u\.?s\.?|american) (?:college|university)\b|\bright to work in (?:the )?(?:u\.?k\.?|united kingdom|u\.?s\.?a?\.?|united states|australia|canada)\b|\bdireito de trabalho no reino unido\b|\bdeve ser (?:cidad[aã]o|residente)\b/i;
+const GEO_EXCLUSION_PHRASE_PATTERN = /\bmust be (?:a |an )?(?:citizen|resident|national)\b|\bmust (?:live|reside) in\b|\bpermanent residents?\b|\bcitizens? or (?:permanent )?residents?( of)?\b|\bcitizens? and residents? of\b|\bopen only to (?:citizens?|residents?|nationals?|(?:applicants|students|candidates|people|individuals|youth|those) (?:from|in|of|living|based|residing))\b|\bpassport issued by\b|\baccredited (?:four-year )?u\.?s\.?(?:-style)? (?:college|university|institution)\b|\benrolled (?:in|at) an? (?:accredited )?(?:u\.?s\.?|american) (?:college|university|institution)\b|\battending an? (?:u\.?s\.?|american) (?:college|university)\b|\bright to work in (?:the )?(?:u\.?k\.?|united kingdom|u\.?s\.?a?\.?|united states|australia|canada)\b|\bdireito de trabalho no reino unido\b|\bdeve ser (?:cidad[aã]o|residente)\b/i;
 
 // Mesma checagem do rótulo estruturado, mas direto no texto bruto de cada
 // fonte (não só na evidence que o modelo devolveu) — cobre dois casos: (1)
@@ -192,7 +193,7 @@ const GEO_EXCLUSION_PHRASE_PATTERN = /\bmust be (?:a |an )?(?:citizen|resident|n
 // perto da frase) não tiver nenhum sinal de alcance Brasil/internacional —
 // evita repetir o falso positivo da Bolsa do Ceará (sinal de alcance longe
 // da frase que disparou o match).
-function findGeographicExclusionEvidence(sources) {
+export function findGeographicExclusionEvidence(sources) {
   for (const source of sources || []) {
     // Página do mesmo host de um blog/agregador, achada durante o
     // rastreamento, cujo texto não menciona nada do título desta
@@ -292,20 +293,44 @@ const STRUCTURAL_INELIGIBILITY_PATTERN = new RegExp(
   `${PROFESSIONAL_ENGAGEMENT_PATTERN.source}|${GRADUATE_DEGREE_REQUIRED_PATTERN.source}|${REGION_DEMONYM_RESTRICTION_PATTERN.source}|${GOVERNMENT_INSTITUTION_ONLY_PATTERN.source}`,
   'i',
 );
+// Caso real (2026-11-07): CISPA Summer Research ("Bachelor's and master's
+// students in computer science") e MPIIB International Summer Internship
+// ("international Bachelor's and Master's students") foram rejeitados porque
+// o menu do site citava "PhD / doctoral studies" e "postdocs graduate
+// program". Uma menção a pós-graduação só prova exigência de pós quando a
+// mesma página não diz que alunos de graduação/ensino médio são aceitos.
+// "bachelor's degree" sozinho fica de fora de propósito: costuma ser
+// pré-requisito de mestrado ("must hold a bachelor's degree").
+const UNDERGRADUATE_ELIGIBLE_PATTERN = /\b(?:bachelor[’']?s|bsc|b\.sc\.?|undergraduate)\s+(?:(?:and|or|\/)\s+(?:master[’']?s|msc|m\.sc\.?|graduate)\s+)?students?\b|\bundergraduates\b|\bhigh school students?\b|\bestudantes? (?:de graduacao|do ensino medio)\b|\bgraduandos?\b/i;
+const STRUCTURAL_INELIGIBILITY_WITHOUT_GRADUATE_PATTERN = new RegExp(
+  `${PROFESSIONAL_ENGAGEMENT_PATTERN.source}|${REGION_DEMONYM_RESTRICTION_PATTERN.source}|${GOVERNMENT_INSTITUTION_ONLY_PATTERN.source}`,
+  'i',
+);
+function structuralIneligibilityMatch(normalized, undergraduateElsewhere = false) {
+  const pattern = undergraduateElsewhere || UNDERGRADUATE_ELIGIBLE_PATTERN.test(normalized)
+    ? STRUCTURAL_INELIGIBILITY_WITHOUT_GRADUATE_PATTERN
+    : STRUCTURAL_INELIGIBILITY_PATTERN;
+  return pattern.exec(normalized);
+}
 
 // Mesma varredura de findGeographicExclusionEvidence, mas para os sinais
 // estruturais acima (profissional/consultoria/pós-graduação/região não-BR).
 // Fica separada (não misturada em STRUCTURAL_INELIGIBILITY_PATTERN dentro da
 // mesma função) só porque cada uma tem sua própria checagem de "a fonte não
 // tem alcance Brasil/internacional" antes de aceitar o match.
-function findStructuralIneligibilityEvidence(sources) {
+export function findStructuralIneligibilityEvidence(sources) {
+  // Fontes da mesma pesquisa: se qualquer página relevante diz que alunos de
+  // graduação/ensino médio podem participar, um menu ou FAQ citando "PhD" em
+  // outra página não prova exigência de pós-graduação.
+  const undergraduateElsewhere = (sources || []).some((source) => source?.trust?.authority !== 'unrelated_same_host_page'
+    && source?.text && UNDERGRADUATE_ELIGIBLE_PATTERN.test(normalizedText(source.text)));
   for (const source of sources || []) {
     if (source?.trust?.authority === 'unrelated_same_host_page') continue;
     const text = source?.text;
     if (!text) continue;
     const norm = normalizedText(text);
     if (BRAZIL_REACH_PATTERN.test(norm) || BRAZIL_LOCAL_REACH_PATTERN.test(norm)) continue;
-    const match = STRUCTURAL_INELIGIBILITY_PATTERN.exec(norm);
+    const match = structuralIneligibilityMatch(norm, undergraduateElsewhere);
     if (match) {
       const start = Math.max(0, match.index - 80);
       const end = Math.min(norm.length, match.index + match[0].length + 80);
@@ -385,7 +410,17 @@ async function limitarHistoricoExecucoes(supabase) {
   const { data, error } = await supabase.from('sentinel_research_runs')
     .select('id').order('started_at', { ascending: false }).range(RUN_HISTORY_LIMIT, RUN_HISTORY_LIMIT + 999);
   if (error || !data?.length) return;
-  await supabase.from('sentinel_research_runs').delete().in('id', data.map((row) => row.id));
+  // Nunca apaga uma execução que ainda tem proposta aguardando revisão: as
+  // propostas caem junto (on delete cascade) e somem da tela sem ninguém ter
+  // aplicado ou rejeitado. Caso real: uma sessão do servidor MCP revisando 12
+  // oportunidades criava 12 execuções e apagava as propostas das primeiras.
+  const ids = data.map((row) => row.id);
+  const { data: pending, error: pendingError } = await supabase.from('sentinel_research_proposals')
+    .select('run_id').in('run_id', ids).eq('status', 'pending');
+  if (pendingError) return;
+  const keep = new Set((pending || []).map((row) => row.run_id));
+  const removable = ids.filter((id) => !keep.has(id));
+  if (removable.length) await supabase.from('sentinel_research_runs').delete().in('id', removable);
 }
 
 export async function createRun(supabase, user, runType, requestedCount, metadata = {}) {
@@ -466,7 +501,7 @@ export async function activeOpportunityTagNames(supabase) {
   return (data || []).map((tag) => String(tag.name || '').trim()).filter(Boolean);
 }
 
-function extractUrl(value) {
+export function extractUrl(value) {
   return String(value || '').match(/https?:\/\/[^\s\)"]+/)?.[0] || null;
 }
 
@@ -995,17 +1030,23 @@ export async function fetchResearchSources(url, opportunity = {}) {
   return { sources, pageFetches, adjacentFailures: failures, plan };
 }
 
-function sourcesForPrompt(sources) {
+export function sourcesForPrompt(sources) {
   return sources.map((source, index) => `[FONTE ${index + 1}]\nURL: ${source.url}\nContexto: ${source.relation}\nAutoridade preliminar: ${source.trust?.authority || 'não avaliada'} (prioridade ${source.trust?.trust_rank ?? 0})\nDescoberta a partir de: ${source.trust?.discovered_from || 'entrada inicial'}\nConteúdo:\n${source.text}`).join('\n\n');
 }
 
 function openAiClient() {
-  if (!process.env.NVIDIA_API_KEY) throw new Error('NVIDIA_API_KEY não configurada no servidor.');
-  return new OpenAI({ apiKey: process.env.NVIDIA_API_KEY, baseURL: 'https://integrate.api.nvidia.com/v1', timeout: MODEL_TIMEOUT_MS, maxRetries: 0 });
+  const { apiKey, baseURL } = modelProviderConfig();
+  return new OpenAI({ apiKey, baseURL, timeout: MODEL_TIMEOUT_MS, maxRetries: 0 });
 }
 
 function modelRequestOptions(model) {
   if (model === 'openai/gpt-oss-20b' || model === 'openai/gpt-oss-120b') {
+    return { reasoning_effort: 'low' };
+  }
+  // MiniMax raciocina antes de responder; sem limite, o raciocínio consome todo
+  // o max_tokens e a resposta volta vazia (medido em 2026-11-07: 2047 de 2048
+  // tokens gastos raciocinando). Com 'low' responde em ~30s com JSON completo.
+  if (model.startsWith('minimaxai/')) {
     return { reasoning_effort: 'low' };
   }
   if (model.startsWith('z-ai/glm-')) {
@@ -1320,14 +1361,15 @@ export function normalizeDiscoveryResult(parsed, research, fallbackUrl, allowedT
   return { result, evidence, validationNotes };
 }
 
-async function groundUrl(url, caption = '', ownerUsername = '', manual = false, sourceUrl = url, allowedTags = []) {
+async function groundUrl(url, caption = '', ownerUsername = '', manual = false, sourceUrl = url, allowedTags = [], deps = {}) {
+  const structuredModel = deps.structuredModel || callStructuredModel;
   let metrics = emptyMetrics();
   try {
     const dossier = await researchOpportunityDossier({
       url,
       opportunity: { link: url },
       leadSource: caption ? { url: sourceUrl, text: caption, relation: manual ? 'Entrada manual' : `Post de origem @${ownerUsername}` } : null,
-    });
+    }, deps);
     const { research, brief } = dossier;
     metrics = dossier.metrics;
     if (brief.qualification.verdict === 'unqualified') {
@@ -1353,7 +1395,7 @@ async function groundUrl(url, caption = '', ownerUsername = '', manual = false, 
     // seguimos para montar a entrada do catálogo e a salvamos como pendente
     // de revisão manual (ver qualification_status abaixo), em vez de perder
     // a oportunidade silenciosamente no log do Sentinel.
-    let response = await callStructuredModel(
+    let response = await structuredModel(
       discoveryPrompt(manual, allowedTags),
       `DOSSIÊ FACTUAL VALIDADO:\n${JSON.stringify(brief)}\n\nFONTES COMPLETAS:\n${sourcesForPrompt(research.sources)}\n\nRetorne o JSON do catálogo agora.`,
     );
@@ -1361,7 +1403,7 @@ async function groundUrl(url, caption = '', ownerUsername = '', manual = false, 
     let mappingAttempts = response.attempts.map((attempt) => ({ ...attempt, phase: 'catalog_mapping' }));
     let normalized = normalizeDiscoveryResult(response.parsed, research, url, allowedTags);
     if (allowedTags.length && normalized.result && normalized.result.keywords.length < 3) {
-      const retry = await callStructuredModel(
+      const retry = await structuredModel(
         `${discoveryPrompt(manual, allowedTags)}\n\nCORREÇÃO OBRIGATÓRIA: a resposta anterior ficou com menos de 3 tags depois da validação. Escolha de 3 a 8 nomes EXATOS do vocabulário ativo.`,
         `RESPOSTA ANTERIOR:\n${JSON.stringify(response.parsed)}\n\nDOSSIÊ FACTUAL VALIDADO:\n${JSON.stringify(brief)}\n\nFONTES COMPLETAS:\n${sourcesForPrompt(research.sources)}\n\nRetorne o JSON completo corrigido.`,
       );
@@ -1431,7 +1473,7 @@ function hasMeaningfulContentDiff(existing, extracted) {
   });
 }
 
-async function findOrCreateOpportunity(supabase, extracted, { refreshOnDuplicateDiff = false } = {}) {
+async function findOrCreateOpportunity(supabase, extracted, { refreshOnDuplicateDiff = false, overwriteDuplicates = true } = {}) {
   const discoveryKey = opportunityDiscoveryKey(extracted.link, extracted.title);
   const { data: exactKey, error: exactKeyError } = await supabase.from('opportunities').select('*').eq('sentinel_discovery_key', discoveryKey).maybeSingle();
   if (exactKeyError) throw exactKeyError;
@@ -1451,6 +1493,18 @@ async function findOrCreateOpportunity(supabase, extracted, { refreshOnDuplicate
     // revisão publicações já no ar toda vez que o scraper batesse nelas nos
     // lotes automáticos — barulho constante que ninguém pediu.
     const contentDiff = refreshOnDuplicateDiff && hasMeaningfulContentDiff(existing, extracted);
+    // Agentes (servidor MCP) nunca sobrescrevem uma linha existente: uma
+    // oportunidade já Aprovada voltaria para "Revisar" e sairia do ar sem
+    // ninguém ter pedido. A mudança vira uma proposta de revisão de catálogo
+    // (start_review), que um humano aplica campo a campo.
+    if (!overwriteDuplicates) {
+      return {
+        opportunity: existing, created: false, updated: false, newerEdition,
+        duplicateReason: newerEdition
+          ? 'Já existe no catálogo e a fonte parece ser uma edição mais nova — nada foi alterado; rode a revisão de catálogo dessa oportunidade.'
+          : 'Já existe no catálogo (mesmo link oficial e nome equivalente) — nada foi alterado.',
+      };
+    }
     if (newerEdition || contentDiff) {
       // Mesmo programa (duplicata confirmada): não cria linha nova — atualiza
       // a oportunidade antiga com o que a pesquisa achou agora e manda de
@@ -1524,11 +1578,18 @@ async function updatePost(supabase, sourceUrl, patch) {
   if (error) throw error;
 }
 
-export async function processPost(supabase, post, runId, manual = false, allowedTags = [], { refreshOnDuplicateDiff = false } = {}) {
+// Link oficial a pesquisar: o informado explicitamente (ex.: o agente MCP
+// achou o site oficial de um post "link na bio"), senão a URL manual, senão o
+// primeiro link da legenda, senão o próprio post.
+export function discoveryResearchUrl(post, manual = false) {
   const sourceUrl = manual ? post.url : post.sourceUrl;
-  const officialUrl = manual ? post.url : extractUrl(post.caption);
+  return post.officialUrl || (manual ? post.url : extractUrl(post.caption)) || sourceUrl;
+}
+
+export async function processPost(supabase, post, runId, manual = false, allowedTags = [], { refreshOnDuplicateDiff = false, overwriteDuplicates = true, deps = {} } = {}) {
+  const sourceUrl = manual ? post.url : post.sourceUrl;
   try {
-    const researched = await groundUrl(officialUrl || sourceUrl, post.caption, post.ownerUsername, manual, sourceUrl, allowedTags);
+    const researched = await groundUrl(discoveryResearchUrl(post, manual), post.caption, post.ownerUsername, manual, sourceUrl, allowedTags, deps);
     if (!researched.result) {
       const now = new Date().toISOString();
       const motivo = researched.rejectionReason || 'A fonte não atende aos critérios da busca.';
@@ -1537,9 +1598,9 @@ export async function processPost(supabase, post, runId, manual = false, allowed
         error: motivo,
         extracted: { evidence: researched.evidence || {}, _sentinel: { ...researched.trace, validation_notes: researched.validationNotes || [] } },
       });
-      return { status: 'rejected', error: motivo, metrics: researched.metrics };
+      return { status: 'rejected', error: motivo, metrics: researched.metrics, qualification: researched.trace?.qualification, validationNotes: researched.validationNotes || [] };
     }
-    const { opportunity, created, updated, duplicateReason } = await findOrCreateOpportunity(supabase, researched.result, { refreshOnDuplicateDiff });
+    const { opportunity, created, updated, duplicateReason, newerEdition } = await findOrCreateOpportunity(supabase, researched.result, { refreshOnDuplicateDiff, overwriteDuplicates });
     const now = new Date().toISOString();
     const status = created ? 'qualified' : 'duplicate';
     await updatePost(supabase, sourceUrl, {
@@ -1551,7 +1612,10 @@ export async function processPost(supabase, post, runId, manual = false, allowed
         _sentinel: { ...researched.trace, validation_notes: researched.validationNotes || [], duplicate_of: created ? null : opportunity.id },
       },
     });
-    return { status, opportunity, created, updated, duplicateReason, metrics: researched.metrics };
+    return {
+      status, opportunity, created, updated, duplicateReason, newerEdition: !!newerEdition, metrics: researched.metrics,
+      extracted: researched.result, evidence: researched.evidence || {}, validationNotes: researched.validationNotes || [],
+    };
   } catch (error) {
     const now = new Date().toISOString();
     try {
@@ -1579,19 +1643,15 @@ async function withConcurrency(items, limit, task) {
   return results;
 }
 
-async function runDiscovery(supabase, maxCandidates, runId) {
+// Raspa as contas de Instagram ativas com a Apify e enfileira (status
+// 'queued') os posts novos que passam na triagem barata. Não pesquisa nada —
+// isso fica com runDiscovery (painel) ou com o agente MCP (list_discovery_leads
+// -> start_discovery). Separada para o servidor MCP poder só enfileirar.
+export async function scrapeInstagramLeads(supabase, runId) {
   const accounts = await activeInstagramAccounts(supabase);
   if (!accounts.length) {
-    // Nenhuma conta ativa = Instagram "desligado". Não chama a Apify, não
-    // gasta nada, só registra a execução como vazia.
-    await updateRun(supabase, runId, { requested_count: 0, metadata: { scraped: 0, new_posts: 0, queued_remaining: 0, instagram_accounts: 0 } });
-    return {
-      response: {
-        scraped: 0, newPosts: 0, candidates: 0, qualified: 0, duplicates: 0, created: 0, rejected: 0, failed: 0, queued: 0,
-        skippedKnownOpportunity: 0, skippedLowScore: 0, instagramAccounts: 0,
-      },
-      metrics: emptyMetrics(),
-    };
+    // Nenhuma conta ativa = Instagram "desligado": não chama a Apify.
+    return { accounts, posts: [], fresh: [], queuedPosts: [], skippedKnownOpportunity: 0, skippedLowScore: 0 };
   }
   if (!process.env.APIFY_API_KEY) throw new Error('APIFY_API_KEY não configurada no servidor.');
   const client = new ApifyClient({ token: process.env.APIFY_API_KEY });
@@ -1661,6 +1721,24 @@ async function runDiscovery(supabase, maxCandidates, runId) {
       processed_at: null,
     })));
     if (error) throw error;
+  }
+  return { accounts, posts, fresh, queuedPosts: scored, skippedKnownOpportunity, skippedLowScore };
+}
+
+async function runDiscovery(supabase, maxCandidates, runId) {
+  const scrapedLeads = await scrapeInstagramLeads(supabase, runId);
+  const { accounts, posts, fresh, skippedKnownOpportunity, skippedLowScore } = scrapedLeads;
+  if (!accounts.length) {
+    // Nenhuma conta ativa = Instagram "desligado". Não chama a Apify, não
+    // gasta nada, só registra a execução como vazia.
+    await updateRun(supabase, runId, { requested_count: 0, metadata: { scraped: 0, new_posts: 0, queued_remaining: 0, instagram_accounts: 0 } });
+    return {
+      response: {
+        scraped: 0, newPosts: 0, candidates: 0, qualified: 0, duplicates: 0, created: 0, rejected: 0, failed: 0, queued: 0,
+        skippedKnownOpportunity: 0, skippedLowScore: 0, instagramAccounts: 0,
+      },
+      metrics: emptyMetrics(),
+    };
   }
   // Rede de segurança contra posts presos em "pending" por uma execução
   // anterior que morreu no meio — agora compartilhada com o fluxo de sites
@@ -2030,8 +2108,13 @@ export function qualificationAtomicSelection(fields = [], changes = {}) {
   ])];
 }
 
-export async function researchOpportunityDossier({ url, opportunity = {}, leadSource = null }) {
-  const research = await fetchResearchSources(url, opportunity);
+// `deps` existe para o servidor MCP (mcp/server.js): lá as fontes já foram
+// coletadas numa etapa anterior e quem "responde" é o modelo do cliente MCP,
+// não a API configurada aqui. Sem `deps`, o comportamento é o de sempre.
+// Anexa a pista de origem (legenda do post, nota manual) às fontes, uma vez só.
+// Exportada para o servidor MCP mostrar ao modelo do cliente exatamente as
+// mesmas fontes que a validação vai usar depois.
+export function attachLeadSource(research, leadSource, url) {
   if (leadSource?.url && leadSource?.text
     && !research.sources.some((source) => sameSourceUrl(source.url, leadSource.url))) {
     research.sources.push(annotateResearchSource({
@@ -2041,7 +2124,21 @@ export async function researchOpportunityDossier({ url, opportunity = {}, leadSo
       depth: -1,
     }, { primaryUrl: url, depth: -1 }));
   }
-  const response = await callStructuredModel(
+  return research;
+}
+
+export function discoveryLeadSource(post, manual = false) {
+  const sourceUrl = manual ? post.url : post.sourceUrl;
+  return post.caption
+    ? { url: sourceUrl, text: post.caption, relation: manual ? 'Entrada manual' : `Post de origem @${post.ownerUsername}` }
+    : null;
+}
+
+export async function researchOpportunityDossier({ url, opportunity = {}, leadSource = null }, deps = {}) {
+  const structuredModel = deps.structuredModel || callStructuredModel;
+  const research = deps.research || await fetchResearchSources(url, opportunity);
+  attachLeadSource(research, leadSource, url);
+  const response = await structuredModel(
     researchBriefPrompt(opportunity, research.plan),
     `${sourcesForPrompt(research.sources)}\n\nRetorne o dossiê factual agora.`,
     { maxTokens: 3072 },
@@ -2270,7 +2367,13 @@ export function isPortugueseCatalogValue(field, value) {
   const values = Array.isArray(value) ? value : [value];
   return values.every((item) => {
     const text = String(item || '');
-    if (ENGLISH_CATALOG_PATTERN.test(text)) return false;
+    // Nomes próprios em inglês ("Harvard Undergraduate Foreign Policy
+    // Initiative") e domínios ("application.afs.org") não tornam o texto
+    // inglês; só o resto da frase conta para os termos proibidos.
+    const withoutNames = text
+      .replace(/\b[\w-]+(?:\.[\w-]+)+\S*/g, ' ')
+      .replace(/\b[A-Z][\w'’-]*(?:\s+(?:of\s+|for\s+|and\s+|&\s+)?[A-Z][\w'’-]*)+/g, ' ');
+    if (ENGLISH_CATALOG_PATTERN.test(withoutNames)) return false;
     const englishMarkers = normalizedText(text).match(/\b(?:the|and|for|with|students?|program|competition|participants?|from|must|will|are|open)\b/g)?.length || 0;
     const portugueseMarkers = normalizedText(text).match(/\b(?:o|a|os|as|e|para|com|estudantes?|programa|competicao|participantes?|de|devem|sera|estao|abertas?)\b/g)?.length || 0;
     return englishMarkers < 2 || portugueseMarkers >= englishMarkers;
@@ -2300,6 +2403,8 @@ const MONTH_NUMBERS = {
   april: 4, abril: 4, may: 5, maio: 5, june: 6, junho: 6, july: 7, julho: 7,
   august: 8, agosto: 8, september: 9, setembro: 9, october: 10, outubro: 10,
   november: 11, novembro: 11, december: 12, dezembro: 12,
+  // English abbreviations ("Submission Deadline Dec 20, 2026").
+  jan: 1, feb: 2, mar: 3, apr: 4, jun: 6, jul: 7, aug: 8, sep: 9, sept: 9, oct: 10, nov: 11, dec: 12,
 };
 const PORTUGUESE_MONTH_NAMES = {
   1: 'janeiro', 2: 'fevereiro', 3: 'março', 4: 'abril', 5: 'maio', 6: 'junho',
@@ -2394,7 +2499,7 @@ export function expiredStatusChange(deadline, currentStatus, today = new Date())
 // "deadline\s*:" e "prazo\s*:" cobrem esse rótulo isolado — ainda seguro
 // porque deadlineLinkedMentions() já exige a data a até 160 caracteres de
 // distância, sem cruzar pontuação de frase.
-const DEADLINE_EVIDENCE_PATTERN = /\b(?:application\s+deadline|deadline\s+(?:for\s+)?(?:applications?|registration|submissions?)|deadline\s*:\s*|prazo\s*:\s*|applications?\s+(?:close|closes|due)|registration\s+(?:close|closes|ends|deadline)|submissions?\s+(?:close|closes|due)|submit(?:ted)?\s+by|register\s+by|due\s+(?:by|on)|(?:periodo\s+(?:para|de)\s+)?inscri(?:cao|coes).{0,90}(?:ate|encerra|encerram|termina|terminam|prazo|periodo|de\s+\d{1,4})|prazo.{0,30}inscri(?:cao|coes)|(?:encerramento|termino)\s+das\s+inscricoes|data\s+limite.{0,30}(?:inscri|candidat|projeto)|formularios?.{0,50}(?:submetid|enviad).{0,20}ate)\b/;
+const DEADLINE_EVIDENCE_PATTERN = /\b(?:application\s+deadline|(?:is|are)\s+(?:also\s+)?(?:our|the|your)\s+(?:application\s+)?deadline|before\s+the\s+[^.!?;]{0,40}?\bdeadline|deadline\s+(?:is\s+)?(?:on\s+)?(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d{1,2}(?:st|nd|rd|th)?|(?:applications?|pitch(?:es)?|entries|entry|essays?|submissions?|projects?|videos?)\b[^.!?;]{0,60}?\b(?:are|is)\s+due\b|submit\s+(?:your|the|an?)\s+(?:\w+\s+){0,2}by|submissions?\s+deadline|deadline\s+(?:for\s+)?(?:applications?|registration|submissions?)|deadline\s*:\s*|prazo\s*:\s*|applications?\s+(?:close|closes|due)|registration\s+(?:close|closes|ends|deadline)|submissions?\s+(?:close|closes|due)|(?:submissions?|applications?)\s+(?:portal|window|period)\s+(?:close|closes|ends)|(?:applications?|registration|submissions?)\s+(?:[\w.-]+\s+){0,4}open\s+(?:through|until)|regist(?:er|ration)\b[^.!?;]{0,120}?\buntil|(?:contest|competition|challenge|applications?|submissions?|registration|entries)\b[^.!?;]{0,60}?\bwill\s+close\s+on|submit(?:ted)?\s+by|submit\s+between\s+\w+\s+\d{1,2}\s+and|register\s+by|due\s+(?:by|on)|(?:periodo\s+(?:para|de)\s+)?inscri(?:cao|coes).{0,90}(?:ate|encerra|encerram|termina|terminam|prazo|periodo|de\s+\d{1,4})|prazo.{0,30}inscri(?:cao|coes)|(?:encerramento|termino)\s+das\s+inscricoes|data\s+limite.{0,30}(?:inscri|candidat|projeto)|formularios?.{0,50}(?:submetid|enviad).{0,20}ate)\b/;
 const ROLLING_EVIDENCE_PATTERN = /\b(?:rolling|open\s+year[- ]round|accepted\s+throughout|inscricoes\s+continuas|fluxo\s+continuo)\b/;
 const REGISTRATION_RANGE_PATTERN = /\binscri(?:cao|coes)\b[^.!?;]{0,35}?(\d{1,2})[\/.\-](\d{1,2})(?:[\/.\-](20\d{2}))?\s*(?:a|ate|ao|[-\u2013\u2014])\s*(\d{1,2})[\/.\-](\d{1,2})(?:[\/.\-](20\d{2}))?/g;
 const REGISTRATION_WRITTEN_RANGE_PATTERN = new RegExp(`\\b(?:periodo\\s+(?:para|de)\\s+)?inscri(?:cao|coes)\\b[^.!?;]{0,140}?\\bde\\s+(\\d{1,2})(?:st|nd|rd|th)?\\s+(?:de\\s+)?(${MONTH_PATTERN})\\s*(?:de|,)?\\s*(20\\d{2})?\\s*(?:a|ate|ao|[-\\u2013\\u2014])\\s*(\\d{1,2})(?:st|nd|rd|th)?\\s+(?:de\\s+)?(${MONTH_PATTERN})\\s*(?:de|,)?\\s*(20\\d{2})?\\b`, 'g');
@@ -2428,7 +2533,12 @@ function deadlineLinkedMentions(value, mentions) {
         const between = text.slice(Math.min(mention.index, markerEnd), Math.max(mention.index, markerEnd));
         return {
           ...mention,
-          crossesBoundary: /[.!?;]/.test(between),
+          // Abreviações como "E.T.", "a.m." e "p.m." não encerram a frase
+          // (RSI: "open through 11:59pm E.T. December 11, 2026").
+          // Idem para meses abreviados ("31st Jan. 2027 Submissions Close").
+          crossesBoundary: /[.!?;]/.test(between
+            .replace(/\b(?:[a-z]\.){2,}/g, '')
+            .replace(/\b(jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)\./g, '$1')),
           distance: Math.min(Math.abs(mention.index - marker.index), Math.abs(mention.index - markerEnd))
             + (mention.index < marker.index ? 80 : 0),
         };
@@ -2478,6 +2588,11 @@ function evidenceDateMatches(proposedValue, quote, sourceText = quote) {
   const linkedPairs = deadlineLinkedMentions(quote, dayMonthMentions(quote));
   const pairMatches = linkedPairs.some(({ parts }) => parts.day === proposedDate.day && parts.month === proposedDate.month);
   if (!pairMatches) return false;
+  // Data sem ano ("Deadline December 31st"): a próxima ocorrência a partir
+  // de hoje é a leitura natural, mesmo quando o texto ao redor cita o ano do
+  // ciclo seguinte ("Priority Decision Round for VTSP 2027"). Caso real:
+  // VTSP, novembro de 2026, prazo 31/12/2026 para o programa de 2027.
+  if (!/\b20\d{2}\b/.test(normalizedText(quote)) && isNextOccurrence(proposedDate)) return true;
   const normalizedSource = normalizedText(sourceText);
   const normalizedQuote = normalizedText(quote);
   const quoteIndex = normalizedSource.indexOf(normalizedQuote);
@@ -2485,6 +2600,13 @@ function evidenceDateMatches(proposedValue, quote, sourceText = quote) {
     ? normalizedSource.slice(Math.max(0, quoteIndex - 240), quoteIndex + normalizedQuote.length + 240)
     : normalizedSource;
   return new RegExp(`\\b${proposedDate.year}\\b`).test(context);
+}
+
+function isNextOccurrence({ day, month, year }, now = new Date()) {
+  const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  const thisYear = Date.UTC(now.getUTCFullYear(), month - 1, day);
+  const expectedYear = thisYear >= today ? now.getUTCFullYear() : now.getUTCFullYear() + 1;
+  return year === expectedYear;
 }
 
 function validDateParts(parts) {
@@ -2578,7 +2700,19 @@ export function findUnambiguousDeadlineEvidence(sources) {
 }
 
 export function findRelevantDeadlineEvidence(sources, today = new Date(), opportunity = {}) {
-  const candidates = deadlineCandidatesFromSources(sources, opportunity);
+  // Páginas do mesmo site sem relação com o programa (ex.: "Apply to be a
+  // Second Year" no site do Camp Rising Sun) trazem prazos de OUTRAS
+  // modalidades; caso real (nov/2026): o prazo de 15/01/2027 dos second-year
+  // campers substituiu o prazo geral de 31/12 do CRS.
+  const unrelated = new Set((sources || [])
+    .filter((source) => source.authority === 'unrelated_same_host_page')
+    .map((source) => source.url));
+  // Prazo de vaga de equipe (monitor, staff) não é prazo de participante;
+  // caso real (nov/2026): o "final deadline May 1, 2026" da vaga de counselor
+  // do SPINWIP virou o prazo do programa.
+  const staffRole = /\b(?:counselors?|this position|staff (?:position|application)|job|employment|second[- ]year (?:camper|participant)s?)\b/i;
+  const candidates = deadlineCandidatesFromSources(sources, opportunity)
+    .filter((candidate) => !unrelated.has(candidate.source_url) && !staffRole.test(candidate.quote || ''));
   const unique = [...new Map(candidates.map((candidate) => [candidate.value, candidate])).values()];
   const current = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
   const future = unique
@@ -2608,7 +2742,15 @@ export function findRollingDeadlineEvidence(sources) {
   return null;
 }
 
+// Uma fonte que anuncia inscrições abertas desmente um "closed" achado em
+// outro trecho ou página. Casos reais (nov/2026): AFS Global STEM ("Applications
+// for the 2027 ... are now open" + página genérica /applications-closed) e Aspire
+// Leaders ("Applications for the 2027 Aspire Leaders Program are OPEN" + "the 2026
+// Leadership Accelerator ... are currently closed", outro programa na mesma página).
+const OPEN_APPLICATION_PATTERN = /\b(?:applications?|registration|inscri(?:ção|ções|cao|coes))\b[^.!?]{0,80}\b(?:(?:are|is)\s+(?:now\s+)?open|abertas?)\b|\bnow\s+accepting\s+applications\b/i;
+
 export function findExplicitClosedApplications(sources, opportunity = {}) {
+  if ((sources || []).some((source) => OPEN_APPLICATION_PATTERN.test(String(source.text || '')))) return null;
   const opportunityYears = new Set(String(opportunity.title || '').match(/\b20\d{2}\b/g) || []);
   for (const source of sources || []) {
     const match = String(source.text || '').match(CLOSED_APPLICATION_PATTERN);
@@ -2768,10 +2910,10 @@ export function validateFieldEvidence(field, proposedValue, rawEvidence, sources
   };
   const semanticQuote = normalizedText(quote);
   if (field === 'language' && !/\b(?:idioma|language|portugues|english|ingles|espanhol|spanish|frances|french)\b/.test(semanticQuote)) {
-    return { valid: false, reason: 'a citaÃ§Ã£o nÃ£o informa o idioma' };
+    return { valid: false, reason: 'a citação não informa o idioma' };
   }
-  if (field === 'process' && !/\b(?:inscri|candidat|application|apply|register|registration|submit|submission|formulario|cadastre|cadastro|pagamento|payment)\b/.test(semanticQuote)) {
-    return { valid: false, reason: 'a citaÃ§Ã£o nÃ£o comprova o processo de inscriÃ§Ã£o' };
+  if (field === 'process' && !/\b(?:inscri|candidat|application|applicants?|apply|interviews?|entrevista|register|registration|submit|submission|formulario|cadastre|cadastro|pagamento|payment)\b/.test(semanticQuote)) {
+    return { valid: false, reason: 'a citação não comprova o processo de inscrição' };
   }
   // Caso real (2026-08-21, True Blue Fellowship): a citação real era "Youth
   // ages 16-24 (at the start of the Fellowship period in January)" — um
@@ -2779,8 +2921,8 @@ export function validateFieldEvidence(field, proposedValue, rawEvidence, sources
   // lista batia com "youth"/"ages" (só tinha "idade" em português e "age"
   // nem estava na lista) — a citação inteira era descartada, e como o modelo
   // não propôs outra evidência de elegibilidade, o campo ficava vazio.
-  if (field === 'eligibility' && !/\b(?:student|estudante|author|autor|eligible|eligibility|elegivel|matriculad|idade|ages?|youth|young people|young person|volunteers?|school|university|college|residencia|resident|aluno|alunos|crianca|criancas|adolescente|adolescentes|fundamental|medio|serie|ano escolar|podem participar|pode participar|cursando|grade|graduate|citizen|cidada|national|nationality|nacionalidade|resides?|living in|morar|reside|born|nascido|jovens?|juventude)\b/.test(semanticQuote)) {
-    return { valid: false, reason: 'a citaÃ§Ã£o nÃ£o comprova critÃ©rios de elegibilidade' };
+  if (field === 'eligibility' && !/\b(?:students?|estudantes?|grades?|aged|years? old|schools?|universities|colleges|citizens(?:hip)?|residents?|author|autor|eligible|eligibility|elegivel|matriculad|idade|ages?|youth|young people|young person|volunteers?|school|university|college|residencia|resident|aluno|alunos|crianca|criancas|adolescente|adolescentes|fundamental|medio|serie|ano escolar|podem participar|pode participar|cursando|grade|graduate|citizen|cidada|national|nationality|nacionalidade|resides?|living in|morar|reside|born|birthday|birth|nascido|jovens?|juventude)\b/.test(semanticQuote)) {
+    return { valid: false, reason: 'a citação não comprova critérios de elegibilidade' };
   }
   if (field !== 'deadline') return { valid: true, evidence };
 
@@ -2804,7 +2946,29 @@ export function validateFieldEvidence(field, proposedValue, rawEvidence, sources
   return { valid: true, evidence };
 }
 
-export async function researchExistingOpportunity(supabase, runId, opportunity, allowedTags = []) {
+// Prompts das etapas 2 e 3 da revisão de catálogo, extraídos para que o
+// servidor MCP (mcp/server.js) entregue ao modelo do cliente exatamente o
+// mesmo texto que o Sentinel usa aqui.
+export function catalogMappingSystemPrompt(opportunity, allowedTags = []) {
+  return catalogReviewPrompt(opportunity, allowedTags)
+    .replace('"DD de mês de YYYY"', '"D de mês de YYYY", sem zero à esquerda')
+    .concat('\n\nFORMATO OBRIGATÓRIO: escreva "4 de setembro de 2026", nunca "04 de setembro de 2026".');
+}
+
+export function catalogMappingUserMessage(research, researchBrief) {
+  return `PLANO EXECUTADO:\n${JSON.stringify(research.plan)}\n\nDOSSIÊ FACTUAL VALIDADO:\n${JSON.stringify(researchBrief)}\n\nFONTES COMPLETAS COM PROVENIÊNCIA:\n${sourcesForPrompt(research.sources)}\n\nConverta somente agora o conjunto da pesquisa nos campos do catálogo e retorne o JSON de auditoria.`;
+}
+
+export function coverageAuditSystemPrompt(mappingPrompt, coverageFields) {
+  return `${mappingPrompt}\n\nCHECAGEM FINAL: responda apenas sobre estes campos ainda problemáticos: ${coverageFields.join(', ')}. Considere o dossiê inteiro e não repita fatos entre eles.`;
+}
+
+export function coverageAuditUserMessage(parsed, research, researchBrief) {
+  return `PRIMEIRA PROPOSTA:\n${JSON.stringify(parsed)}\n\nDOSSIÊ FACTUAL VALIDADO:\n${JSON.stringify(researchBrief)}\n\nFONTES COMPLETAS COM PROVENIÊNCIA:\n${sourcesForPrompt(research.sources)}\n\nCorrija somente os campos listados na checagem final, com citações literais.`;
+}
+
+export async function researchExistingOpportunity(supabase, runId, opportunity, allowedTags = [], deps = {}) {
+  const structuredModel = deps.structuredModel || callStructuredModel;
   const original = Object.fromEntries(REVIEW_FIELDS.map((field) => [field, opportunity[field]]));
   if (!opportunity.link) {
     const row = {
@@ -2822,17 +2986,17 @@ export async function researchExistingOpportunity(supabase, runId, opportunity, 
   let modelAttempts = [];
   try {
     stage = 'Síntese factual da pesquisa';
-    const dossier = await researchOpportunityDossier({ url: opportunity.link, opportunity });
+    const dossier = await researchOpportunityDossier({ url: opportunity.link, opportunity }, deps);
     const { research, brief: researchBrief, response: briefResponse } = dossier;
     metrics = dossier.metrics;
     modelAttempts = briefResponse.attempts.map((attempt) => ({ ...attempt, phase: 'research_brief' }));
     stage = 'Conversão do dossiê para o catálogo';
-    const prompt = catalogReviewPrompt(opportunity, allowedTags)
-      .replace('"DD de mês de YYYY"', '"D de mês de YYYY", sem zero à esquerda')
-      .concat('\n\nFORMATO OBRIGATÓRIO: escreva "4 de setembro de 2026", nunca "04 de setembro de 2026".');
+    const prompt = catalogMappingSystemPrompt(opportunity, allowedTags);
     let response;
     try {
-      response = await callStructuredModel(prompt, `PLANO EXECUTADO:\n${JSON.stringify(research.plan)}\n\nDOSSIÊ FACTUAL VALIDADO:\n${JSON.stringify(researchBrief)}\n\nFONTES COMPLETAS COM PROVENIÊNCIA:\n${sourcesForPrompt(research.sources)}\n\nConverta somente agora o conjunto da pesquisa nos campos do catálogo e retorne o JSON de auditoria.`);
+      // 4096: a proposta completa (campos + evidência literal por campo) mais o
+      // raciocínio de modelos que pensam antes de responder não cabe em 2048.
+      response = await structuredModel(prompt, catalogMappingUserMessage(research, researchBrief), { maxTokens: 4096 });
     } catch (error) {
       error.modelAttempts = [...modelAttempts, ...(error.modelAttempts || []).map((attempt) => ({ ...attempt, phase: 'catalog_mapping' }))];
       throw error;
@@ -2845,9 +3009,10 @@ export async function researchExistingOpportunity(supabase, runId, opportunity, 
     const coverageFields = catalogCoverageFields(opportunity, parsed.updates || {}, allowedTags);
     if (coverageFields.length) {
       try {
-        const coverageResponse = await callStructuredModel(
-          `${prompt}\n\nCHECAGEM FINAL: responda apenas sobre estes campos ainda problemáticos: ${coverageFields.join(', ')}. Considere o dossiê inteiro e não repita fatos entre eles.`,
-          `PRIMEIRA PROPOSTA:\n${JSON.stringify(parsed)}\n\nDOSSIÊ FACTUAL VALIDADO:\n${JSON.stringify(researchBrief)}\n\nFONTES COMPLETAS COM PROVENIÊNCIA:\n${sourcesForPrompt(research.sources)}\n\nCorrija somente os campos listados na checagem final, com citações literais.`,
+        const coverageResponse = await structuredModel(
+          coverageAuditSystemPrompt(prompt, coverageFields),
+          coverageAuditUserMessage(parsed, research, researchBrief),
+          { maxTokens: 4096 },
         );
         metrics = addMetrics(metrics, coverageResponse.metrics);
         modelAttempts = [...modelAttempts, ...coverageResponse.attempts.map((attempt) => ({ ...attempt, phase: 'coverage_audit' }))];
@@ -2930,7 +3095,7 @@ export async function researchExistingOpportunity(supabase, runId, opportunity, 
       evidence.link = {
         source_url: primarySourceUrl,
         kind: 'official_redirect',
-        summary_pt: 'O endereÃ§o oficial redirecionou permanentemente para esta pÃ¡gina.',
+        summary_pt: 'O endereço oficial redirecionou permanentemente para esta página.',
       };
       validationNotes.push('link atualizado para o destino oficial do redirecionamento');
     }
@@ -2941,9 +3106,9 @@ export async function researchExistingOpportunity(supabase, runId, opportunity, 
       evidence.link = {
         source_url: applicationSource.url,
         kind: 'official_application_page',
-        summary_pt: 'PÃ¡gina oficial de submissÃ£o encontrada durante a pesquisa.',
+        summary_pt: 'Página oficial de submissão encontrada durante a pesquisa.',
       };
-      validationNotes.push('link atualizado para a pÃ¡gina oficial de candidatura ou submissÃ£o');
+      validationNotes.push('link atualizado para a página oficial de candidatura ou submissão');
     }
     const cleanedEligibility = normalizeEligibilityForCatalog(
       original.eligibility,
@@ -2974,7 +3139,7 @@ export async function researchExistingOpportunity(supabase, runId, opportunity, 
           ...writingEvidence,
           summary_pt: 'A oportunidade seleciona e publica trabalhos escritos.',
         };
-        validationNotes.push('type especializado como competiÃ§Ã£o de escrita');
+        validationNotes.push('type especializado como competição de escrita');
       }
     }
     const recoveredDeadline = findRelevantDeadlineEvidence(research.sources, new Date(), opportunity);
@@ -3004,7 +3169,7 @@ export async function researchExistingOpportunity(supabase, runId, opportunity, 
         proposed.deadline = recoveredRollingDeadline.value;
         changes.deadline = { before: original.deadline ?? null, after: recoveredRollingDeadline.value };
         evidence.deadline = checkedEvidence.evidence;
-        validationNotes.push('inscriÃ§Ãµes contÃ­nuas recuperadas diretamente da fonte oficial');
+        validationNotes.push('inscrições contínuas recuperadas diretamente da fonte oficial');
       }
     }
     const vagueDeadline = !changes.deadline && vagueDeadlineChange(original.deadline);
@@ -3038,7 +3203,13 @@ export async function researchExistingOpportunity(supabase, runId, opportunity, 
       delete evidence.status;
       validationNotes.push('status Encerrada descartado porque ainda existe uma modalidade com inscrições abertas');
     }
-    if (hasActiveDeadline && ['Encerrada', 'Revisar'].includes(original.status) && !changes.status) {
+    // "Revisar" é a fila de aprovação humana: um prazo aberto não basta para
+    // aprovar. Caso real (nov/2026): Sir Cyril Taylor Young African Leaders,
+    // restrito à África Subsaariana, ia de Revisar para Aprovada só porque o
+    // prazo ainda estava aberto. Só reabre Revisar quando a qualificação passou.
+    const canReopen = original.status === 'Encerrada'
+      || (original.status === 'Revisar' && researchBrief?.qualification?.verdict === 'qualified');
+    if (hasActiveDeadline && canReopen && !changes.status) {
       proposed.status = 'Aprovada';
       changes.status = { before: original.status, after: 'Aprovada' };
       evidence.status = {
@@ -3096,6 +3267,7 @@ export async function researchExistingOpportunity(supabase, runId, opportunity, 
           research_plan: research.plan,
           research_brief: researchBrief,
           adjacent_failures: research.adjacentFailures,
+          validation_notes: validationNotes,
         },
       },
       notes: null,

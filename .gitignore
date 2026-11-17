@@ -4,10 +4,13 @@ dist
 .env.local
 .env.*.local
 .agents/skills
-.claude/skills
+.claude/skills/*
+!.claude/skills/newsletter-prep/
 package-lock.json
 skills-lock.json
 client_secret.json
 
 .vercel
 .env*
+graphify-out/
+.DS_Store

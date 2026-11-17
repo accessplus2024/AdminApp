@@ -104,6 +104,22 @@ export async function fetchResearchRun(runId) {
   };
 }
 
+// Sugestões do Sentinel para UMA oportunidade, mais recentes primeiro — usada
+// no painel lateral do detalhe da oportunidade.
+export async function fetchOpportunityProposals(opportunityId, { status = 'pending' } = {}) {
+  if (!isSupabaseConfigured || !opportunityId) return [];
+  let query = supabase
+    .from('sentinel_research_proposals')
+    .select('*, opportunity:opportunities(id,title,deadline,link,status)')
+    .eq('opportunity_id', opportunityId)
+    .order('created_at', { ascending: false })
+    .limit(10);
+  if (status) query = query.eq('status', status);
+  const { data, error } = await query;
+  if (error) throw new Error(error.message);
+  return data || [];
+}
+
 async function callSentinel(body) {
   if (!isSupabaseConfigured) throw new Error('Supabase não configurado.');
   const { data } = await supabase.auth.getSession();
